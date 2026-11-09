@@ -27,6 +27,9 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           add-rust-environment-hash-key: false
+      - name: 装 ALSA 的开发文件（cpal 在 Linux 上要）
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - name: 取 sherpa-onnx 的静态库（照 tools/sherpa-onnx.lock 校验）
         shell: bash
         run: tools/sherpa-lib.sh

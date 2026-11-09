@@ -22,6 +22,8 @@ ureq = "3.5.1"
 bzip2 = "0.6.1"
 tar = { version = "0.4.46", default-features = false }
 sha2 = "0.11"
+# 录本机麦克风（设计 20 第三节 stt.record）：Linux 走 ALSA（PipeWire、PulseAudio 都有它的 ALSA 插口），macOS CoreAudio，Windows WASAPI。
+cpal = "0.18.2"
 # 主进程交给识别子进程的音频（wav）写成 base64 放进一行 JSON。
 base64 = "0.22"
 miyu-ext.workspace = true
