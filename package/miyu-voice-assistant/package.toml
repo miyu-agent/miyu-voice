@@ -22,8 +22,9 @@ about = { en = "Turn the voice assistant on or off", zh = "开关语音助手", 
 args = ["serve"]
 start = "always"
 # audio.record：听唤醒词；audio.play：提示音；packages.call：调 stt、tts；act_for_external：在 voice 场所里替主人说话
-# （核心 VA-1：voice 平台的 owner 天然是主人）；events.read：订阅会话，一句句念她的回答。
-capabilities = ["audio.record", "audio.play", "packages.call", "act_for_external", "events.read"]
+# （核心 VA-1：voice 平台的 owner 天然是主人）；events.read：订阅会话，一句句念她的回答；sessions.drive：开口就打断时
+# 打断这一轮（session.interrupt）。
+capabilities = ["audio.record", "audio.play", "packages.call", "act_for_external", "events.read", "sessions.drive"]
 
 # 场所会话的平台：voice:local 一个场所，只有主人（设计 20 第九节，core1 11-10 定 A）。
 [connection]
@@ -61,3 +62,11 @@ layers = ["system"]
 applies = "program_start"
 name = { en = "Microphone", zh = "麦克风", ja = "マイク" }
 description = { en = "The device name. Empty: the system default.", zh = "设备名。不填用系统默认的。", ja = "デバイス名。空欄はシステムの既定。" }
+
+[settings.full_duplex]
+type = "bool"
+default = false
+layers = ["system"]
+applies = "now"
+name = { en = "Full duplex (with headphones)", zh = "全双工（戴耳机时）", ja = "全二重（ヘッドホン使用時）" }
+description = { en = "Keep listening while she speaks, so you can cut in. Only with headphones: through speakers she would hear herself.", zh = "她说话时也听着，你一开口她就停。只在戴耳机时打开：外放的话她会听到自己的声音。", ja = "話している間も聞き続け、話しかけると止まります。ヘッドホンのときだけ：スピーカーだと自分の声を拾います。" }

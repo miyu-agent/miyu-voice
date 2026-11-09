@@ -28,6 +28,8 @@ const KEYWORD_TAIL: usize = RATE * 3 / 10;
 const SHORTEST: usize = RATE / 2;
 /// 能量门关了以后再放多久（采样）：1.5 秒，比人声检测认句尾的 0.6 秒长，句尾一定喂得到。
 const GATE_TRAIL: usize = RATE * 3 / 2;
+/// 人声连着多久算开口（采样）：0.3 秒（设计 20 第九节第 6 步）。
+const ONSET: usize = RATE * 3 / 10;
 
 /// 听到了什么。
 #[derive(Debug, Clone, PartialEq)]
@@ -41,6 +43,8 @@ pub enum Event {
     },
     /// 窗口开着的时候说的一句（追问、唤醒以后的那句）。
     Speech(Vec<f32>),
+    /// 有人开口了：人声连着 0.3 秒（第 6 步「开口就打断」），一句话只报一次，这句说完才再报。这一句照样还会切出来交回。
+    Onset,
 }
 
 /// 灵敏度（配置页「灵敏度」）。
@@ -104,6 +108,9 @@ pub struct Listener {
     was_admitted: bool,
     /// 窗口开着：说什么都算一句，不用唤醒词。
     window: bool,
+    /// 这一句人声连着多少采样了；报过开口的记 `onset_told`。
+    voiced: usize,
+    onset_told: bool,
 }
 
 impl Listener {
@@ -163,6 +170,8 @@ impl Listener {
             runs: VecDeque::new(),
             was_admitted: false,
             window: false,
+            voiced: 0,
+            onset_told: false,
         })
     }
 
@@ -189,6 +198,16 @@ impl Listener {
             self.admitted_total += frame.len();
         }
         let mut events = Vec::new();
+        if admitted && self.vad.detected() {
+            self.voiced += frame.len();
+            if self.voiced >= ONSET && !self.onset_told {
+                self.onset_told = true;
+                events.push(Event::Onset);
+            }
+        } else {
+            self.voiced = 0;
+            self.onset_told = false;
+        }
         while let Some(segment) = self.vad.front() {
             let start = usize::try_from(segment.start()).unwrap_or(0);
             let audio = self.with_pre_roll(start, segment.samples());

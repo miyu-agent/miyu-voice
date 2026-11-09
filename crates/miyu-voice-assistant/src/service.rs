@@ -36,6 +36,8 @@ pub struct Settings {
     pub threshold: f32,
     /// 麦克风的设备名；空的用默认。
     pub microphone: String,
+    /// 全双工（戴耳机时开）：她说话时也收麦，开口就打断她。
+    pub full_duplex: bool,
 }
 
 impl Settings {
@@ -64,6 +66,10 @@ impl Settings {
         Settings {
             wake_words,
             threshold,
+            full_duplex: config
+                .get("voice-assistant.full_duplex")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             microphone: config
                 .get("voice-assistant.microphone")
                 .and_then(Value::as_str)
@@ -131,8 +137,11 @@ impl Service {
 
     /// 配置变了：重读（唤醒词变了的，下一次开麦时照新的建）。
     pub fn reload(&self, core: &Core) {
-        *self.settings.lock().unwrap_or_else(PoisonError::into_inner) =
-            Settings::from_config(&core.config());
+        let settings = Settings::from_config(&core.config());
+        self.switches
+            .full_duplex
+            .store(settings.full_duplex, Ordering::SeqCst);
+        *self.settings.lock().unwrap_or_else(PoisonError::into_inner) = settings;
     }
 
     /// 起来以后：下模型，建听的那一套，一直收着麦（另开线程）；认字也另开线程，免得认的时候漏了麦克风的声音。
@@ -180,6 +189,7 @@ impl Service {
             }
         });
         let service = Arc::clone(self);
+        let barge_core = core.clone();
         let microphone = Some(settings.microphone.clone()).filter(|name| !name.is_empty());
         std::thread::spawn(move || {
             let mut awaiting = None::<Instant>;
@@ -217,6 +227,15 @@ impl Service {
                         Event::Speech(audio) => {
                             awaiting = None;
                             let _ = utterances.send(audio);
+                        }
+                        // 她正念着、你开口了（只有全双工收得到）：打断。打断要等核心回，另开线程，不耽误收麦。
+                        Event::Onset => {
+                            if service.switches.speaking.load(Ordering::SeqCst)
+                                && let Some(conversation) = service.conversation()
+                            {
+                                let core = barge_core.clone();
+                                std::thread::spawn(move || conversation.barge_in(&core));
+                            }
                         }
                     }
                 }

@@ -26,20 +26,24 @@ pub struct Switches {
     pub listening: Arc<AtomicBool>,
     /// 她在说话（半双工：不收麦）。
     pub speaking: Arc<AtomicBool>,
+    /// 全双工（戴耳机）：她说话的时候也收麦，好听得见打断（设计 20 第九节第 7 步）。
+    pub full_duplex: Arc<AtomicBool>,
     /// 整个程序要退了。
     pub quit: Arc<AtomicBool>,
 }
 
 impl Switches {
     fn wanted(&self) -> bool {
-        self.listening.load(Ordering::SeqCst) && !self.speaking.load(Ordering::SeqCst)
+        self.listening.load(Ordering::SeqCst)
+            && (self.full_duplex.load(Ordering::SeqCst) || !self.speaking.load(Ordering::SeqCst))
     }
 }
 
 /// 一直跑到 `quit`：该收的时候收，一帧帧交给 `frame`。`device` 是麦克风的设备名。
 ///
 /// 测试用：设了 `MIYU_VOICE_TEST_MIC`（一个 16 kHz 单声道的 wav）的不开麦，开着的时候照实时的快慢把这个文件「听」一遍，前后各垫
-/// 两秒安静，再往后一直是安静（端到端测试不碰主人的麦克风，施工 VO-11下）。
+/// 两秒安静，再往后一直是安静（端到端测试不碰主人的麦克风，施工 VO-11下）。另设了 `MIYU_VOICE_TEST_MIC_CUT_IN`（同样的 wav）的，
+/// 她第一次开口念的时候把它「听」一遍，测开口就打断（施工 VO-12，要开全双工才收得到）。
 pub fn run(device: Option<&str>, switches: &Switches, mut frame: impl FnMut(&[f32])) {
     if let Some(path) = std::env::var_os("MIYU_VOICE_TEST_MIC") {
         play_file(&std::path::PathBuf::from(path), switches, &mut frame);
@@ -111,10 +115,16 @@ fn listen_while_held(mic: &Mic, switches: &Switches, frame: &mut impl FnMut(&[f3
 
 /// 测试用的「麦克风」：开着才喂，她在说话时不喂（半双工），照实时的快慢。
 fn play_file(path: &std::path::Path, switches: &Switches, frame: &mut impl FnMut(&[f32])) {
-    let samples = std::fs::read(path)
-        .ok()
-        .and_then(|bytes| voice_common::audio::read_wav(&bytes).ok())
-        .map(|pcm| pcm.samples)
+    let read = |path: &std::path::Path| {
+        std::fs::read(path)
+            .ok()
+            .and_then(|bytes| voice_common::audio::read_wav(&bytes).ok())
+            .map(|pcm| pcm.samples)
+            .unwrap_or_default()
+    };
+    let samples = read(path);
+    let mut cut_in = std::env::var_os("MIYU_VOICE_TEST_MIC_CUT_IN")
+        .map(|path| read(std::path::Path::new(&path)))
         .unwrap_or_default();
     let quiet = vec![0.0f32; RATE * 2];
     let mut audio = quiet.clone();
@@ -126,6 +136,9 @@ fn play_file(path: &std::path::Path, switches: &Switches, frame: &mut impl FnMut
         if !switches.wanted() {
             std::thread::sleep(CHECK);
             continue;
+        }
+        if at >= audio.len() && !cut_in.is_empty() && switches.speaking.load(Ordering::SeqCst) {
+            audio.extend(std::mem::take(&mut cut_in));
         }
         let piece = audio.get(at..at + FRAME).unwrap_or(&silence);
         frame(piece);

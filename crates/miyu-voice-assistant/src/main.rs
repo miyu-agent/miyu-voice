@@ -163,6 +163,7 @@ fn run_listener(models: &models::Models, lines: &[String], wav: &str) -> Result<
                 listen::Event::Speech(audio) => {
                     println!("speech: {} ms", audio.len() * 1000 / listen::RATE);
                 }
+                listen::Event::Onset => println!("onset"),
             }
         }
     }
