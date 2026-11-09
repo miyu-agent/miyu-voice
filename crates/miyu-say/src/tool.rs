@@ -44,9 +44,9 @@ fn run(service: &Arc<Service>, args: &Value, call: &Call) -> Result<String, Stri
     if call.cwd().is_empty() {
         return Err("No workspace for this turn.".to_string());
     }
-    // 先用默认音色：核心给 tool.call 加上 persona（core1 11-10 定，排在 PL-1 后面）、开发包的 Call 能读它以后照人格挑。
+    // 照这一轮的人格挑音色（核心 TC-1 起 tool.call 带 persona）；没有人格、没给它配的用默认音色。
     let audio = service
-        .speak(text, None, Format::Mp3)
+        .speak(text, call.persona(), Format::Mp3)
         .map_err(|error| error.message)?;
     let folder = Path::new(call.cwd()).join(FOLDER);
     let name = format!("say-{}.mp3", short_hash(&audio.bytes));

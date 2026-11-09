@@ -91,8 +91,11 @@ impl Conversation {
             )
             .map_err(|error| format!("session.note: {error}"))?;
         }
-        core.call("subscribe", json!({"stream": "events", "session": session}))
+        let subscribed = core
+            .call("subscribe", json!({"stream": "events", "session": session}))
             .map_err(|error| format!("subscribe: {error}"))?;
+        // 照会话的人格念（朗读的配置里每个人格一种音色，设计 20 第六节）；没有人格的用默认音色。
+        let persona = subscribed["persona"].as_str().map(str::to_string);
         let window = Arc::new(Mutex::new(Window::default()));
         let (sentences, queue) = mpsc::channel();
         let generation = Arc::new(AtomicU64::new(0));
@@ -104,6 +107,7 @@ impl Conversation {
                 window: Arc::clone(&window),
                 generation: Arc::clone(&generation),
                 played: Arc::clone(&played),
+                persona,
             },
             queue,
         );
@@ -218,6 +222,8 @@ struct Turn {
     window: Arc<Mutex<Window>>,
     generation: Arc<AtomicU64>,
     played: Arc<Mutex<Vec<String>>>,
+    /// 会话的人格：念的时候交给 `tts`，照它挑音色。
+    persona: Option<String>,
 }
 
 /// 念的那个线程：一句句交总线上的 `tts.play`，念的时候半双工不收麦（全双工的照收，好听得见打断）；一轮完了、念完了开追问窗口。
@@ -233,7 +239,8 @@ fn speak_in_turn(core: Core, switches: Switches, turn: Turn, queue: mpsc::Receiv
                     switches.speaking.store(true, Ordering::SeqCst);
                     let played = core.call(
                         "bus.call",
-                        json!({"name": "tts", "method": "play", "params": {"text": sentence}}),
+                        json!({"name": "tts", "method": "play",
+                               "params": {"text": sentence, "persona": turn.persona}}),
                     );
                     switches.speaking.store(false, Ordering::SeqCst);
                     if matches!(&played, Ok(answer) if answer["finished"] == true) {
