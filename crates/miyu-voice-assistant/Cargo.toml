@@ -12,6 +12,10 @@ name = "miyu-voice-assistant"
 path = "src/main.rs"
 
 [dependencies]
+# 人声检测（Silero VAD）、唤醒词（KWS）：sherpa-onnx，同语音输入那一版，库照 tools/sherpa-lib.sh 校验过的。
+sherpa-onnx = "=2.0.1"
+# 唤醒词里的汉字注带调拼音（keywords.rs，同旧版）。
+pinyin = "0.11.0"
 miyu-ext.workspace = true
 serde_json.workspace = true
 voice-common.workspace = true

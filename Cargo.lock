@@ -827,7 +827,9 @@ name = "miyu-voice-assistant"
 version = "0.1.0"
 dependencies = [
  "miyu-ext",
+ "pinyin",
  "serde_json",
+ "sherpa-onnx",
  "voice-common",
 ]
 
@@ -836,14 +838,10 @@ name = "miyu-voice-input"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "bzip2 0.6.1",
  "cpal",
  "miyu-ext",
  "serde_json",
- "sha2",
  "sherpa-onnx",
- "tar",
- "ureq 3.5.1",
  "voice-common",
 ]
 
@@ -1089,6 +1087,12 @@ name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+
+[[package]]
+name = "pinyin"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e225f595052d9c46045755be4b8d7950b6d9f3c33e0c0b74ba58f11bbfa8c64b"
 
 [[package]]
 name = "pkg-config"
@@ -1742,10 +1746,14 @@ name = "voice-common"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "bzip2 0.6.1",
  "hound",
  "miyu-ext",
  "pulldown-cmark",
  "serde_json",
+ "sha2",
+ "tar",
+ "ureq 3.5.1",
 ]
 
 [[package]]

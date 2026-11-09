@@ -16,12 +16,6 @@ path = "src/main.rs"
 # GitHub Release 下预编译库、不验校验和；CI 和发包照 tools/sherpa-lib.sh 先下、对照钉死的 SHA-256 校验，再用
 # SHERPA_ONNX_LIB_DIR 指过去。
 sherpa-onnx = "=2.0.1"
-# 下模型：纯 Rust 的 HTTPS（rustls），走系统代理。
-ureq = "3.5.1"
-# 模型压缩包是 .tar.bz2；bzip2 默认用纯 Rust 的 libbz2-rs-sys。
-bzip2 = "0.6.1"
-tar = { version = "0.4.46", default-features = false }
-sha2 = "0.11"
 # 录本机麦克风（设计 20 第三节 stt.record）：Linux 走 ALSA（PipeWire、PulseAudio 都有它的 ALSA 插口），macOS CoreAudio，Windows WASAPI。
 cpal = "0.18.2"
 # 主进程交给识别子进程的音频（wav）写成 base64 放进一行 JSON。
