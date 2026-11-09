@@ -17,6 +17,8 @@ ureq = "3.5.1"
 # MiniMax 的音频是十六进制，MiMo 的是 base64。
 hex = "0.4.3"
 base64 = "0.22"
+# say 工具存的文件名用内容哈希。
+sha2 = "0.11"
 # 本机放（设计 20 第三节 tts.play）：rodio 0.23 用的 cpal 和语音输入同一版（0.18）；只要放、mp3 和 wav 的解码。
 rodio = { version = "0.23.0", default-features = false, features = ["playback", "mp3", "wav"] }
 miyu-ext.workspace = true

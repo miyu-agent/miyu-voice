@@ -1,36 +1,50 @@
-//! 朗读（设计 20 第六节）：云端合成，在总线上提供 tts、她的 say 工具、命令 miyu say。
+//! 朗读（设计 20 第六节）：云端合成，在总线上提供 tts，她的工具 `say`，命令 `miyu say`。
 //!
-//! 核心照清单 `[process] args` 带 `serve` 拉起；人敲 `miyu say …` 时核心把后面的参数原样交过来。这一步（施工 VO-7）：
-//! 三家引擎、Markdown 转念得出来的话、本机放；命令行先从环境变量拿 key（开发、查问题用），配置页、工具、经核心找到
-//! 在跑的进程去放在 VO-8，总线上的方法在 VO-10。
+//! 核心照清单 `[process] args` 带 `serve` 拉起：照包的配置（`say.*`）配引擎，配好了登记 `tts.*`（[`service`]），登记
+//! `say` 工具（[`tool`]）。人敲 `miyu say …` 时核心把参数原样交过来：命令当本机的头连核心，经总线找到在跑的 `tts` 去合成、
+//! 去放（[`client`]），自己不读 key、不碰声卡。
 
+mod client;
 mod engine;
 mod http;
 mod mimo;
 mod minimax;
 mod openai;
 mod say;
+mod service;
+mod settings;
 mod speaker;
+mod tool;
 
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
 
-use miyu_ext::Extension;
+use miyu_ext::{Extension, Method};
+use serde_json::{Value, json};
 
-use crate::engine::{Engine, Format};
+use crate::client::Client;
+use crate::service::Service;
 
-const USAGE: &str = "usage: miyu say [--engine minimax|mimo|openai] [--voice ID] [--speed 1.0] [-o FILE] <text>
-       miyu say --file AUDIO
-       miyu say --voices [--engine E]
-  keys come from MINIMAX_API_KEY (+ MINIMAX_REGION=international), MIMO_API_KEY, OPENAI_API_KEY (+ OPENAI_BASE_URL, OPENAI_TTS_MODEL) for now";
+const USAGE: &str = "usage: miyu say <text>            read it aloud in the current voice
+       miyu say -o FILE <text>    save it to FILE (.mp3 or .wav) instead
+       miyu say --file AUDIO      play an audio file
+       miyu say --voices          list the engine's voices";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("serve") => {
-            Extension::new("miyu-say", env!("CARGO_PKG_VERSION")).run();
+            serve();
             ExitCode::SUCCESS
         }
-        Some(_) => say(&args),
+        Some(_) => match command(&args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(why) => {
+                eprintln!("miyu say: {why}");
+                ExitCode::FAILURE
+            }
+        },
         None => {
             eprintln!("{USAGE}");
             ExitCode::FAILURE
@@ -38,93 +52,119 @@ fn main() -> ExitCode {
     }
 }
 
-/// `miyu say …`：合成、放，或者存成文件；`--file` 只放一个现成的。
-fn say(args: &[String]) -> ExitCode {
-    let speaker = speaker::Speaker::default();
-    if let Some(path) = option(args, "--file") {
-        return match std::fs::read(path)
-            .map_err(|error| error.to_string())
-            .and_then(|bytes| speaker.play(bytes).map_err(|error| format!("{error:?}")))
-        {
-            Ok(_) => ExitCode::SUCCESS,
-            Err(why) => {
-                eprintln!("{why}");
-                ExitCode::FAILURE
-            }
-        };
-    }
+fn serve() {
+    let service = Service::new(&serde_json::Map::new());
+    let mut ext = Extension::new("miyu-say", env!("CARGO_PKG_VERSION"));
+    service.register(&mut ext);
+    let for_tool = Arc::clone(&service);
+    ext.tool(tool::spec(), move |args, call| {
+        tool::call(&for_tool, args, call)
+    });
+    // 只给自己的命令行用（`miyu say --voices` 经 package.call），不上总线。
+    let for_voices = Arc::clone(&service);
+    ext.method_with(Method::new("voices"), move |_, _, _| {
+        let voices: Vec<Value> = for_voices
+            .settings()
+            .engine()
+            .voices()
+            .into_iter()
+            .map(|voice| json!({"id": voice.id, "name": voice.name}))
+            .collect();
+        Ok(json!({"voices": voices}))
+    });
+    let on_ready = Arc::clone(&service);
+    ext.ready(move |core| on_ready.refresh(core));
+    // 配置推送的处理函数跑在读核心回应的那个线程上（开发包 miyu-ext 0.1）：在里面等核心回 package.methods 会把自己卡死，
+    // 另开线程去改登记（2026-11-10 端到端测出来的）。
+    let on_config = Arc::clone(&service);
+    ext.on_config(move |_, core| {
+        let service = Arc::clone(&on_config);
+        let core = core.clone();
+        std::thread::spawn(move || service.refresh(&core));
+    });
+    ext.run();
+}
+
+/// `miyu say …`：连核心，照参数调 `tts` 或者自己的 `voices`。
+fn command(args: &[String]) -> Result<(), String> {
+    let home = std::env::var_os("MIYU_HOME")
+        .map(PathBuf::from)
+        .ok_or("MIYU_HOME is not set; run it as `miyu say`.")?;
+    let mut core = Client::connect(&home)?;
     if args.iter().any(|arg| arg == "--voices") {
-        for voice in from_env(option(args, "--engine").unwrap_or("minimax")).voices() {
-            println!("{}\t{}", voice.id, voice.name);
+        let answer = core.call(
+            "package.call",
+            &json!({"package": "miyu-say", "method": "voices"}),
+        )?;
+        for voice in answer["voices"].as_array().into_iter().flatten() {
+            println!(
+                "{}\t{}",
+                voice["id"].as_str().unwrap_or_default(),
+                voice["name"].as_str().unwrap_or_default()
+            );
         }
-        return ExitCode::SUCCESS;
+        return Ok(());
+    }
+    if let Some(file) = option(args, "--file") {
+        let path = std::fs::canonicalize(file).map_err(|error| format!("{file}: {error}"))?;
+        let stored = core.call("blob.put", &json!({"path": path}))?;
+        return play(&mut core, &json!({"audio": stored["blob"]}));
     }
     let text = words(args);
     if text.is_empty() {
-        eprintln!("{USAGE}");
-        return ExitCode::FAILURE;
+        return Err(USAGE.to_string());
     }
-    let engine = from_env(option(args, "--engine").unwrap_or("minimax"));
-    let voice = option(args, "--voice").unwrap_or("");
-    let speed = option(args, "--speed")
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1.0);
-    let out = option(args, "-o");
-    let wav = out.is_some_and(|path| {
-        std::path::Path::new(path)
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("wav"))
-    });
-    let format = if wav { Format::Wav } else { Format::Mp3 };
-    let audio = match say::synthesize(engine.as_ref(), &text, voice, speed, format) {
-        Ok(audio) => audio,
-        Err(error) => {
-            eprintln!("{}: {}", error.code(), error.message());
-            return ExitCode::FAILURE;
-        }
-    };
-    let result = match out {
-        Some(path) => std::fs::write(path, &audio.bytes).map_err(|error| error.to_string()),
-        None => speaker
-            .play(audio.bytes)
-            .map(drop)
-            .map_err(|error| format!("{error:?}")),
-    };
-    match result {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(why) => {
-            eprintln!("{why}");
-            ExitCode::FAILURE
-        }
+    match option(args, "-o") {
+        Some(out) => save(&mut core, &text, Path::new(out)),
+        None => play(&mut core, &json!({"text": text})),
     }
 }
 
-/// 开发用：照环境变量配一家引擎。
-fn from_env(name: &str) -> Box<dyn Engine> {
-    let env = |key: &str| std::env::var(key).unwrap_or_default();
-    match name {
-        "mimo" => Box::new(mimo::MiMo {
-            base_url: mimo::BASE_URL.to_string(),
-            key: env("MIMO_API_KEY"),
-            model: mimo::MODEL.to_string(),
-        }),
-        "openai" => Box::new(openai::OpenAiCompatible {
-            base_url: std::env::var("OPENAI_BASE_URL")
-                .unwrap_or_else(|_| "https://api.openai.com/v1".to_string()),
-            key: env("OPENAI_API_KEY"),
-            model: std::env::var("OPENAI_TTS_MODEL")
-                .unwrap_or_else(|_| "gpt-4o-mini-tts".to_string()),
-        }),
-        _ => Box::new(minimax::MiniMax {
-            base_url: if env("MINIMAX_REGION") == "international" {
-                minimax::INTERNATIONAL.to_string()
-            } else {
-                minimax::MAINLAND.to_string()
-            },
-            key: env("MINIMAX_API_KEY"),
-            model: minimax::MODEL.to_string(),
-        }),
+fn play(core: &mut Client, params: &Value) -> Result<(), String> {
+    core.call(
+        "bus.call",
+        &json!({"name": "tts", "method": "play", "params": params}),
+    )
+    .map(drop)
+}
+
+/// 合成，存到 `out`：照扩展名挑 mp3 或 wav，经 `blob.get` 一块块读回来。
+fn save(core: &mut Client, text: &str, out: &Path) -> Result<(), String> {
+    let wav = out
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("wav"));
+    let format = if wav { "wav" } else { "mp3" };
+    let made = core.call(
+        "bus.call",
+        &json!({"name": "tts", "method": "synthesize", "params": {"text": text, "format": format}}),
+    )?;
+    let blob = made["audio"].as_str().unwrap_or_default().to_string();
+    let mut bytes = Vec::new();
+    loop {
+        let part = core.call(
+            "blob.get",
+            &json!({"blob": blob, "offset": bytes.len(), "length": 512 * 1024}),
+        )?;
+        let data = base64_decode(part["data"].as_str().unwrap_or_default())?;
+        if data.is_empty() {
+            break;
+        }
+        bytes.extend(data);
+        if part["size"]
+            .as_u64()
+            .is_some_and(|size| bytes.len() as u64 >= size)
+        {
+            break;
+        }
     }
+    std::fs::write(out, bytes).map_err(|error| format!("{}: {error}", out.display()))
+}
+
+fn base64_decode(data: &str) -> Result<Vec<u8>, String> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .map_err(|error| format!("The core sent bad base64: {error}."))
 }
 
 /// `--name value` 的 value。
@@ -140,19 +180,11 @@ fn words(args: &[String]) -> String {
     for arg in args {
         if skip {
             skip = false;
-            continue;
-        }
-        if arg == "--voices" {
-            continue;
-        }
-        if matches!(
-            arg.as_str(),
-            "--engine" | "--voice" | "--speed" | "-o" | "--file"
-        ) {
+        } else if matches!(arg.as_str(), "-o" | "--file") {
             skip = true;
-            continue;
+        } else if arg != "--voices" {
+            out.push(arg.as_str());
         }
-        out.push(arg.as_str());
     }
     out.join(" ")
 }

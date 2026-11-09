@@ -53,7 +53,6 @@ impl Speaker {
     }
 
     /// 正在放的、排着的全停；交回停了几个。
-    #[expect(dead_code, reason = "VO-10 登记 tts.stop 时用")]
     pub fn stop(&self) -> usize {
         let stopped = self.pending.load(Ordering::SeqCst);
         self.generation.fetch_add(1, Ordering::SeqCst);

@@ -9,6 +9,8 @@ name = { en = "Say", zh = "朗读", ja = "読み上げ" }
 summary = { en = "Reads replies aloud with a cloud voice; she can speak and send voice messages", zh = "用云端的声音把回复念出来；她能说话、能发语音", ja = "クラウドの声で返信を読み上げます。AI が話したり音声メッセージを送ったりできます" }
 upstream = "https://github.com/miyu-agent/miyu-voice"
 icon = "volume-2"
+# 配置键是 say.*（不写是 miyu-say.*，太长）。
+prefix = "say"
 
 # miyu say <文字>：用当前人格的声音从本机音箱念；-o 存成文件；--file 放一个现成的音频（设计 20 第六节）。
 [command]
@@ -26,3 +28,126 @@ capabilities = ["tools", "audio.play", "network", "packages.call"]
 [export]
 provides = ["tts"]
 methods = ["tts.synthesize", "tts.play", "tts.stop"]
+
+# 配置页（设计 20 第六节「配置页」）：引擎、地址和 key（secret，另存在密钥文件里）、默认的音色和语速、每个人格的音色。
+# 改了就生效：扩展收到推送，换引擎；选的引擎没配好的，tts.* 撤掉登记（头就不画朗读按钮）。
+
+[settings.engine]
+type = "option"
+choices = [
+    { value = "minimax", name = { en = "MiniMax", zh = "MiniMax", ja = "MiniMax" } },
+    { value = "mimo", name = { en = "MiMo (Xiaomi)", zh = "MiMo（小米）", ja = "MiMo（Xiaomi）" } },
+    { value = "openai", name = { en = "OpenAI-compatible", zh = "OpenAI 兼容", ja = "OpenAI 互換" }, description = { en = "OpenAI, SiliconFlow, or a local GPT-SoVITS / Kokoro server with /audio/speech.", zh = "OpenAI、硅基流动，或者本机起的 GPT-SoVITS、Kokoro 这类带 /audio/speech 的服务。", ja = "OpenAI、SiliconFlow、または /audio/speech を持つローカルの GPT-SoVITS・Kokoro など。" } },
+]
+default = "minimax"
+layers = ["system"]
+applies = "now"
+name = { en = "Engine", zh = "引擎", ja = "エンジン" }
+description = { en = "Which service turns text into speech.", zh = "用哪家把字念出来。", ja = "どのサービスで読み上げるか。" }
+
+[settings.voice]
+type = "text"
+max = 200
+layers = ["system"]
+applies = "now"
+name = { en = "Default voice", zh = "默认音色", ja = "既定の声" }
+description = { en = "The engine's voice id. Empty: the engine's default.", zh = "引擎的音色编号。不填用引擎的默认音色。", ja = "エンジンの声の ID。空欄はエンジンの既定。" }
+
+[settings.speed]
+type = "number"
+min = 0
+max = 2
+step = 0.1
+slider = true
+default = 1.0
+layers = ["system"]
+applies = "now"
+name = { en = "Speed", zh = "语速", ja = "話す速さ" }
+description = { en = "0.5 to 2. Not every engine takes it.", zh = "0.5 到 2。不是每家都认。", ja = "0.5〜2。対応しないエンジンもあります。" }
+
+[settings.personas]
+type = "list"
+element = "record"
+title = "voice"
+layers = ["system"]
+applies = "now"
+name = { en = "Voices per persona", zh = "每个人格的音色", ja = "ペルソナごとの声" }
+description = { en = "A persona not listed uses the default voice. Clone a real person's voice only with their consent.", zh = "没列的人格用默认音色。克隆真人的声音要本人同意。", ja = "載っていないペルソナは既定の声。実在の人の声の複製は本人の同意が必要です。" }
+
+[settings.personas.fields.persona]
+type = "persona"
+name = { en = "Persona", zh = "人格", ja = "ペルソナ" }
+
+[settings.personas.fields.voice]
+type = "text"
+max = 200
+name = { en = "Voice id", zh = "音色编号", ja = "声の ID" }
+
+[settings.personas.fields.speed]
+type = "number"
+min = 0
+max = 2
+step = 0.1
+default = 1.0
+name = { en = "Speed", zh = "语速", ja = "話す速さ" }
+
+[settings.minimax.region]
+type = "option"
+choices = ["mainland", "international"]
+default = "mainland"
+layers = ["system"]
+applies = "now"
+name = { en = "MiniMax region", zh = "MiniMax 地区", ja = "MiniMax の地域" }
+description = { en = "mainland: api.minimaxi.com. international: api.minimax.io. Keys don't work across regions.", zh = "mainland 国内（api.minimaxi.com），international 国际（api.minimax.io）。两边的 key 不通用。", ja = "mainland は中国本土（api.minimaxi.com）、international は国際版（api.minimax.io）。キーは共通ではありません。" }
+
+[settings.minimax.key]
+type = "secret"
+layers = ["system"]
+applies = "now"
+name = { en = "MiniMax API key", zh = "MiniMax 的 API key", ja = "MiniMax の API キー" }
+
+[settings.minimax.model]
+type = "text"
+max = 100
+default = "speech-2.8-turbo"
+layers = ["system"]
+applies = "now"
+name = { en = "MiniMax model", zh = "MiniMax 的模型", ja = "MiniMax のモデル" }
+description = { en = "speech-2.8-turbo is fast and cheap; speech-2.8-hd sounds better.", zh = "speech-2.8-turbo 快、便宜；speech-2.8-hd 音质更好。", ja = "speech-2.8-turbo は速くて安価、speech-2.8-hd は高音質。" }
+
+[settings.mimo.key]
+type = "secret"
+layers = ["system"]
+applies = "now"
+name = { en = "MiMo API key", zh = "MiMo 的 API key", ja = "MiMo の API キー" }
+
+[settings.mimo.model]
+type = "text"
+max = 100
+default = "mimo-v2.5-tts"
+layers = ["system"]
+applies = "now"
+name = { en = "MiMo model", zh = "MiMo 的模型", ja = "MiMo のモデル" }
+
+[settings.openai.base_url]
+type = "url"
+default = "https://api.openai.com/v1"
+layers = ["system"]
+applies = "now"
+name = { en = "Address", zh = "地址", ja = "アドレス" }
+description = { en = "Up to /v1, e.g. http://127.0.0.1:9880/v1 for a local server.", zh = "写到 /v1 为止，本机服务例如 http://127.0.0.1:9880/v1。", ja = "/v1 まで。ローカルなら例えば http://127.0.0.1:9880/v1。" }
+
+[settings.openai.key]
+type = "secret"
+layers = ["system"]
+applies = "now"
+name = { en = "API key", zh = "API key", ja = "API キー" }
+description = { en = "Leave empty for a local server that needs none.", zh = "本机不要 key 的服务留空。", ja = "キー不要のローカルサーバーなら空欄。" }
+
+[settings.openai.model]
+type = "text"
+max = 100
+default = "gpt-4o-mini-tts"
+layers = ["system"]
+applies = "now"
+name = { en = "Model", zh = "模型", ja = "モデル" }
