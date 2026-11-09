@@ -1,6 +1,6 @@
-//! 人敲的 `miyu say` 连核心（核心 `docs/reference/connection.md`「本机的头」）：数据根的 `run/socket` 里是套接字的路径
-//! （Windows 是命名管道的名字），`run/token` 里是本机令牌；握手以后经总线 `bus.call` 找到在跑的 `tts` 去合成、去放，
-//! 所以命令不用自己知道 key、不用碰声卡（设计 20 第六节）。只读的会话里数据根藏着，连不上，照实说（core1 11-10）。
+//! 人敲的命令（`miyu say`、`miyu listen`）连核心（核心 `docs/reference/connection.md`「本机的头」）：数据根的 `run/socket`
+//! 里是套接字的路径（Windows 是命名管道的名字），`run/token` 里是本机令牌；握手以后经总线、`package.call` 找到在跑的那个
+//! 进程去办，命令自己不读配置、不碰声卡（设计 20 第六、九节）。只读的会话里数据根藏着，连不上，照实说（core1 11-10）。
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -24,7 +24,7 @@ impl Client {
     /// # Errors
     ///
     /// 核心没在跑、读不到套接字或令牌（只读的会话里是这样）、握手被拒。
-    pub fn connect(home: &Path) -> Result<Client, String> {
+    pub fn connect(home: &Path, kind: &str) -> Result<Client, String> {
         let unreachable =
             |why: String| format!("Cannot reach the Miyu core ({why}). Is it running?");
         let address = std::fs::read_to_string(home.join("run/socket"))
@@ -36,11 +36,11 @@ impl Client {
             reader,
             writer,
             next: 0,
-            prefix: format!("say-{}-", std::process::id()),
+            prefix: format!("{kind}-{}-", std::process::id()),
         };
         client.call(
             "hello",
-            &json!({"protocol": [1, 1], "head": {"kind": "miyu-say", "version": env!("CARGO_PKG_VERSION")}, "token": token.trim()}),
+            &json!({"protocol": [1, 1], "head": {"kind": kind, "version": env!("CARGO_PKG_VERSION")}, "token": token.trim()}),
         )?;
         Ok(client)
     }

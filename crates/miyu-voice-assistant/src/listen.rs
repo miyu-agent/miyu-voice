@@ -167,10 +167,6 @@ impl Listener {
     }
 
     /// 开、关窗口（追问窗口、等唤醒以后的那句；第 5 步）。
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "会话那一段（等核心 VA-1）开关窗口")
-    )]
     pub fn set_window(&mut self, open: bool) {
         self.window = open;
     }

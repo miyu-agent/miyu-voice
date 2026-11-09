@@ -10,7 +10,7 @@ use voice_common::blobs;
 use crate::engine::Format;
 use crate::say;
 use crate::settings::Settings;
-use crate::speaker::{PlayError, Speaker};
+use voice_common::speaker::{PlayError, Speaker};
 
 /// 三个方法的全名。
 pub const METHODS: [&str; 3] = ["tts.synthesize", "tts.play", "tts.stop"];

@@ -2,14 +2,12 @@
 //! 系统默认的（第十一节），录成单声道，一帧帧交给 [`Endpoint`] 判什么时候停；`stt.stop` 经 [`Stopper`] 叫停。
 //! 录完交回原采样率的样本，转 16 kHz、认，交给识别的子进程。
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
-use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{FromSample, SampleFormat, SizedSample};
 use voice_common::audio::Pcm;
+use voice_common::mic::Mic;
 use voice_common::mic_lock::{LockError, MicLock};
 
 use crate::endpoint::{Ended, Endpoint, FRAME_MS};
@@ -58,36 +56,8 @@ pub fn record(
             "The microphone lock folder is not safe to use: {why}."
         )),
     })?;
-    let host = cpal::default_host();
-    let chosen = device.and_then(|name| {
-        host.input_devices().ok()?.find(|found| {
-            found
-                .description()
-                .is_ok_and(|description| description.name() == name)
-        })
-    });
-    let input = chosen
-        .or_else(|| host.default_input_device())
-        .ok_or_else(|| RecordError::NoMicrophone("No microphone was found.".to_string()))?;
-    let supported = input.default_input_config().map_err(|error| {
-        RecordError::NoMicrophone(format!("The microphone cannot be opened: {error}."))
-    })?;
-    let rate = supported.sample_rate();
-    let channels = usize::from(supported.channels());
-    let config = supported.config();
-    let (chunks, received) = mpsc::channel::<Vec<f32>>();
-    let failed: Arc<Mutex<Option<String>>> = Arc::default();
-    let stream = match supported.sample_format() {
-        SampleFormat::F32 => open::<f32>(&input, &config, channels, chunks, &failed),
-        SampleFormat::I16 => open::<i16>(&input, &config, channels, chunks, &failed),
-        SampleFormat::U16 => open::<u16>(&input, &config, channels, chunks, &failed),
-        SampleFormat::I32 => open::<i32>(&input, &config, channels, chunks, &failed),
-        other => Err(format!("Unsupported microphone sample format {other}.")),
-    }
-    .map_err(RecordError::NoMicrophone)?;
-    stream.play().map_err(|error| {
-        RecordError::NoMicrophone(format!("The microphone cannot start: {error}."))
-    })?;
+    let mic = Mic::open(device).map_err(RecordError::NoMicrophone)?;
+    let rate = mic.rate;
 
     stopper.flag.store(false, Ordering::SeqCst);
     stopper.recording.store(true, Ordering::SeqCst);
@@ -101,11 +71,11 @@ pub fn record(
         if stopper.flag.load(Ordering::SeqCst) {
             break Ended::Stop;
         }
-        if let Some(why) = failed.lock().unwrap_or_else(PoisonError::into_inner).take() {
+        if let Some(why) = mic.failure() {
             stopper.recording.store(false, Ordering::SeqCst);
             return Err(RecordError::NoMicrophone(why));
         }
-        if let Ok(chunk) = received.recv_timeout(Duration::from_millis(50)) {
+        if let Ok(chunk) = mic.chunks.recv_timeout(Duration::from_millis(50)) {
             samples.extend(chunk);
         }
         while samples.len() - fed >= frame {
@@ -116,41 +86,6 @@ pub fn record(
         }
     };
     stopper.recording.store(false, Ordering::SeqCst);
-    drop(stream);
+    drop(mic);
     Ok((Pcm { samples, rate }, ended))
-}
-
-/// 开一路录音：回调里把几个声道平均成一个，交给录的那一头。
-fn open<T>(
-    input: &cpal::Device,
-    config: &cpal::StreamConfig,
-    channels: usize,
-    chunks: mpsc::Sender<Vec<f32>>,
-    failed: &Arc<Mutex<Option<String>>>,
-) -> Result<cpal::Stream, String>
-where
-    T: SizedSample,
-    f32: FromSample<T>,
-{
-    let failed = Arc::clone(failed);
-    input
-        .build_input_stream::<T, _, _>(
-            *config,
-            move |data: &[T], _| {
-                let mono: Vec<f32> = data
-                    .chunks(channels.max(1))
-                    .map(|frame| {
-                        let sum: f32 = frame.iter().map(|s| s.to_sample::<f32>()).sum();
-                        sum / f32::from(u16::try_from(frame.len()).unwrap_or(1))
-                    })
-                    .collect();
-                let _ = chunks.send(mono);
-            },
-            move |error| {
-                *failed.lock().unwrap_or_else(PoisonError::into_inner) =
-                    Some(format!("The microphone stopped: {error}."));
-            },
-            None,
-        )
-        .map_err(|error| format!("The microphone cannot be opened: {error}."))
 }

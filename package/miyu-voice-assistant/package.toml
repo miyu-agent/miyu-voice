@@ -24,3 +24,33 @@ capabilities = ["audio.record", "audio.play", "packages.call"]
 
 [depends]
 packages = ["miyu-voice-input", "miyu-say"]
+
+# 配置页（设计 20 第九节「配置页」）：唤醒词、灵敏度、麦克风。键是 voice-assistant.*。
+
+[settings.wake_words]
+type = "list"
+element = "text"
+layers = ["system"]
+applies = "program_start"
+name = { en = "Wake words", zh = "唤醒词", ja = "ウェイクワード" }
+description = { en = "Chinese characters, kana or Latin letters, e.g. 密友密友, みゆみゆ, miyumiyu. Empty: Miyu's names. Try one with: miyu listen wake-test <word>.", zh = "汉字、假名、拉丁字母都行，例如 密友密友、みゆみゆ、miyumiyu。不填用 Miyu 的名字。先试试：miyu listen wake-test <词>。", ja = "漢字・かな・ローマ字。例：密友密友、みゆみゆ、miyumiyu。空欄は Miyu の名前。試すには：miyu listen wake-test <語>。" }
+
+[settings.sensitivity]
+type = "number"
+min = 0
+max = 1
+step = 0.05
+slider = true
+default = 0.25
+layers = ["system"]
+applies = "program_start"
+name = { en = "Wake threshold", zh = "唤醒门槛", ja = "ウェイクのしきい値" }
+description = { en = "Lower wakes more easily, and more often by mistake.", zh = "越低越容易叫醒，也越容易误醒。", ja = "低いほど反応しやすく、誤反応も増えます。" }
+
+[settings.microphone]
+type = "text"
+max = 200
+layers = ["system"]
+applies = "program_start"
+name = { en = "Microphone", zh = "麦克风", ja = "マイク" }
+description = { en = "The device name. Empty: the system default.", zh = "设备名。不填用系统默认的。", ja = "デバイス名。空欄はシステムの既定。" }

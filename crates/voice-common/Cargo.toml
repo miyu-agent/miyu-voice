@@ -7,7 +7,15 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# 打开麦克风（mic.rs）：听写、助手要；朗读不要。
+mic = ["dep:cpal"]
+# 从本机音箱放（speaker.rs）：朗读、助手要；听写不要。
+speaker = ["dep:rodio"]
+
 [dependencies]
+cpal = { version = "0.18.2", optional = true }
+rodio = { version = "0.23.0", default-features = false, features = ["playback", "mp3", "wav"], optional = true }
 # wav 的读写（纯 Rust）：stt.transcribe 收 wav（设计 20 第三节「形状」）。
 hound = "3.5.1"
 # Markdown 转成念得出来的话（设计 20 第四节）：同 miyu-render 用的那一版，不要它的 HTML 输出。

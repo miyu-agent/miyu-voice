@@ -815,7 +815,6 @@ dependencies = [
  "base64 0.22.1",
  "hex",
  "miyu-ext",
- "rodio",
  "serde_json",
  "sha2",
  "ureq 3.5.1",
@@ -838,7 +837,6 @@ name = "miyu-voice-input"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "cpal",
  "miyu-ext",
  "serde_json",
  "sherpa-onnx",
@@ -1747,9 +1745,11 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "bzip2 0.6.1",
+ "cpal",
  "hound",
  "miyu-ext",
  "pulldown-cmark",
+ "rodio",
  "serde_json",
  "sha2",
  "tar",

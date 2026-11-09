@@ -2,9 +2,8 @@
 //!
 //! 核心照清单 `[process] args` 带 `serve` 拉起：照包的配置（`say.*`）配引擎，配好了登记 `tts.*`（[`service`]），登记
 //! `say` 工具（[`tool`]）。人敲 `miyu say …` 时核心把参数原样交过来：命令当本机的头连核心，经总线找到在跑的 `tts` 去合成、
-//! 去放（[`client`]），自己不读 key、不碰声卡。
+//! 去放（`voice_common::client`），自己不读 key、不碰声卡。
 
-mod client;
 mod engine;
 mod http;
 mod mimo;
@@ -13,7 +12,6 @@ mod openai;
 mod say;
 mod service;
 mod settings;
-mod speaker;
 mod tool;
 
 use std::path::{Path, PathBuf};
@@ -23,8 +21,8 @@ use std::sync::Arc;
 use miyu_ext::{Extension, Method};
 use serde_json::{Value, json};
 
-use crate::client::Client;
 use crate::service::Service;
+use voice_common::client::Client;
 
 const USAGE: &str = "usage: miyu say <text>            read it aloud in the current voice
        miyu say -o FILE <text>    save it to FILE (.mp3 or .wav) instead
@@ -90,7 +88,7 @@ fn command(args: &[String]) -> Result<(), String> {
     let home = std::env::var_os("MIYU_HOME")
         .map(PathBuf::from)
         .ok_or("MIYU_HOME is not set; run it as `miyu say`.")?;
-    let mut core = Client::connect(&home)?;
+    let mut core = Client::connect(&home, "miyu-say")?;
     if args.iter().any(|arg| arg == "--voices") {
         let answer = core.call(
             "package.call",
