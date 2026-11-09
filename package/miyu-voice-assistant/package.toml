@@ -9,6 +9,8 @@ name = { en = "Voice assistant", zh = "语音助手", ja = "音声アシスタ�
 summary = { en = "Runs in the background: say her name and talk", zh = "常驻后台：叫她的名字就能说话", ja = "バックグラウンドで待機：名前を呼べば話せます" }
 upstream = "https://github.com/miyu-agent/miyu-voice"
 icon = "audio-lines"
+# 配置键是 voice-assistant.*（不写是包的编号，太长；程序照这个前缀读）。
+prefix = "voice-assistant"
 
 # miyu listen：开关切换；miyu listen on、off 写明（设计 20 第九节）。
 [command]
@@ -19,8 +21,13 @@ about = { en = "Turn the voice assistant on or off", zh = "开关语音助手", 
 [process]
 args = ["serve"]
 start = "always"
-# audio.record：听唤醒词；audio.play：提示音、放她的回答；packages.call：调 stt、tts。造场所会话要的能力施工 VO-11 定。
-capabilities = ["audio.record", "audio.play", "packages.call"]
+# audio.record：听唤醒词；audio.play：提示音；packages.call：调 stt、tts；act_for_external：在 voice 场所里替主人说话
+# （核心 VA-1：voice 平台的 owner 天然是主人）；events.read：订阅会话，一句句念她的回答。
+capabilities = ["audio.record", "audio.play", "packages.call", "act_for_external", "events.read"]
+
+# 场所会话的平台：voice:local 一个场所，只有主人（设计 20 第九节，core1 11-10 定 A）。
+[connection]
+platform = "voice"
 
 [depends]
 packages = ["miyu-voice-input", "miyu-say"]

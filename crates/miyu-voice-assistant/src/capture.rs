@@ -37,7 +37,14 @@ impl Switches {
 }
 
 /// 一直跑到 `quit`：该收的时候收，一帧帧交给 `frame`。`device` 是麦克风的设备名。
+///
+/// 测试用：设了 `MIYU_VOICE_TEST_MIC`（一个 16 kHz 单声道的 wav）的不开麦，开着的时候照实时的快慢把这个文件「听」一遍，前后各垫
+/// 两秒安静，再往后一直是安静（端到端测试不碰主人的麦克风，施工 VO-11下）。
 pub fn run(device: Option<&str>, switches: &Switches, mut frame: impl FnMut(&[f32])) {
+    if let Some(path) = std::env::var_os("MIYU_VOICE_TEST_MIC") {
+        play_file(&std::path::PathBuf::from(path), switches, &mut frame);
+        return;
+    }
     let mut warned = None::<String>;
     while !switches.quit.load(Ordering::SeqCst) {
         if !switches.wanted() {
@@ -99,5 +106,30 @@ fn listen_while_held(mic: &Mic, switches: &Switches, frame: &mut impl FnMut(&[f3
             frame(piece);
         }
         pending.drain(..whole);
+    }
+}
+
+/// 测试用的「麦克风」：开着才喂，她在说话时不喂（半双工），照实时的快慢。
+fn play_file(path: &std::path::Path, switches: &Switches, frame: &mut impl FnMut(&[f32])) {
+    let samples = std::fs::read(path)
+        .ok()
+        .and_then(|bytes| voice_common::audio::read_wav(&bytes).ok())
+        .map(|pcm| pcm.samples)
+        .unwrap_or_default();
+    let quiet = vec![0.0f32; RATE * 2];
+    let mut audio = quiet.clone();
+    audio.extend(samples);
+    audio.extend(&quiet);
+    let mut at = 0;
+    let silence = [0.0f32; FRAME];
+    while !switches.quit.load(Ordering::SeqCst) {
+        if !switches.wanted() {
+            std::thread::sleep(CHECK);
+            continue;
+        }
+        let piece = audio.get(at..at + FRAME).unwrap_or(&silence);
+        frame(piece);
+        at += FRAME;
+        std::thread::sleep(Duration::from_millis(32));
     }
 }

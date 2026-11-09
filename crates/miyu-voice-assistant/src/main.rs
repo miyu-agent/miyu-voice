@@ -6,9 +6,11 @@
 
 mod capture;
 mod chime;
+mod conversation;
 mod keywords;
 mod listen;
 mod models;
+mod reply;
 mod service;
 
 use std::path::PathBuf;

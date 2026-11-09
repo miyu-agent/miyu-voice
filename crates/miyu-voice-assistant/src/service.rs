@@ -1,6 +1,6 @@
 //! 跑着的助手（设计 20 第九节）：读配置、开关（`miyu listen`，记在包的状态目录里，重启照旧）、一直收着麦交给听的那一套；
-//! 听到唤醒词响一声，唤醒词后面那句（或者唤醒以后 8 秒内说的下一句）交总线上的 `stt` 认成字。认出来的字交给会话、念回答
-//! 等核心的 VA-1（施工 VO-11下）。
+//! 听到唤醒词响一声，唤醒词后面那句（或者唤醒以后 8 秒内说的下一句）交总线上的 `stt` 认成字，交给场所会话里的她，她的回答
+//! 一句句念出来（[`crate::conversation`]）；念完 30 秒内接着说不用再叫她。
 //!
 //! 装上默认是关着的：一直开着的麦克风不该因为装了一个包就自己打开，主人敲 `miyu listen` 才开。
 
@@ -16,9 +16,11 @@ use voice_common::{audio, blobs, speaker::Speaker};
 
 use crate::capture::{self, Switches};
 use crate::chime::{self, Chime};
+use crate::conversation::Conversation;
 use crate::keywords;
 use crate::listen::{Event, Listener, RATE, Sensitivity};
 use crate::models::Models;
+use crate::reply::Reply;
 
 /// 唤醒以后等下一句多久（只说了唤醒词的）。
 const AWAIT: Duration = Duration::from_secs(8);
@@ -79,6 +81,8 @@ pub struct Service {
     switches: Switches,
     speaker: Speaker,
     settings: Mutex<Settings>,
+    conversation: Mutex<Option<Arc<Conversation>>>,
+    reply: Mutex<Reply>,
 }
 
 impl Service {
@@ -93,6 +97,8 @@ impl Service {
             switches: Switches::default(),
             speaker: Speaker::default(),
             settings: Mutex::new(Settings::from_config(&Map::new())),
+            conversation: Mutex::new(None),
+            reply: Mutex::new(Reply::default()),
         };
         service.switches.listening.store(on, Ordering::SeqCst);
         Arc::new(service)
@@ -104,6 +110,23 @@ impl Service {
         ext.method_with(Method::new("listen"), move |params, _, _| {
             service.switch(params)
         });
+        // 会话推来的事件（订阅了 events 流）：她的回答一句句念。
+        let service = Arc::clone(self);
+        ext.on("event", move |params, _| {
+            if let Some(conversation) = service.conversation() {
+                let mut reply = service.reply.lock().unwrap_or_else(PoisonError::into_inner);
+                let session = params["session"].as_str().unwrap_or_default();
+                conversation.event(&mut reply, session, &params["event"]);
+            }
+            Value::Null
+        });
+    }
+
+    fn conversation(&self) -> Option<Arc<Conversation>> {
+        self.conversation
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// 配置变了：重读（唤醒词变了的，下一次开麦时照新的建）。
@@ -127,11 +150,33 @@ impl Service {
         // 听的那一套（两个模型，约 40 MB）第一次真的开麦收到声音时才建：装上没开的助手只占几 MB。
         let mut listener: Option<Listener> = None;
         let mut unbuildable = false;
+        match Conversation::open(core, &self.switches) {
+            Ok(conversation) => {
+                *self
+                    .conversation
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = Some(conversation);
+            }
+            Err(why) => eprintln!("miyu-voice-assistant: {why}"),
+        }
         let (utterances, heard) = mpsc::channel::<Vec<f32>>();
         let worker_core = core.clone();
+        let service = Arc::clone(self);
         std::thread::spawn(move || {
             for audio in heard {
-                understand(&worker_core, &audio);
+                let Some(text) = understand(&worker_core, &audio) else {
+                    continue;
+                };
+                match service.conversation() {
+                    Some(conversation) => {
+                        if let Err(why) = conversation.say(&worker_core, &text) {
+                            eprintln!("miyu-voice-assistant: {why}");
+                        }
+                    }
+                    None => {
+                        eprintln!("miyu-voice-assistant: heard \"{text}\" but there is no session");
+                    }
+                }
             }
         });
         let service = Arc::clone(self);
@@ -153,22 +198,24 @@ impl Service {
                 };
                 if awaiting.is_some_and(|since| since.elapsed() > AWAIT) {
                     awaiting = None;
-                    listener.set_window(false);
                 }
+                // 窗口：唤醒以后等下一句的 8 秒，她在想、在说，念完以后的追问窗口。
+                let follow_up = service
+                    .conversation()
+                    .is_some_and(|conversation| conversation.window_open());
+                listener.set_window(awaiting.is_some() || follow_up);
                 for event in listener.feed(frame) {
                     match event {
                         Event::Wake { rest, .. } => {
                             chime::play(&service.speaker, Chime::Wake);
                             if rest.is_empty() {
                                 awaiting = Some(Instant::now());
-                                listener.set_window(true);
                             } else {
                                 let _ = utterances.send(rest);
                             }
                         }
                         Event::Speech(audio) => {
                             awaiting = None;
-                            listener.set_window(false);
                             let _ = utterances.send(audio);
                         }
                     }
@@ -178,8 +225,8 @@ impl Service {
     }
 }
 
-/// 认一句：存成 wav 的 blob，交总线上的 `stt`。认出来的交给会话等 VA-1；现在记进日志。
-fn understand(core: &Core, audio: &[f32]) {
+/// 认一句：存成 wav 的 blob，交总线上的 `stt`；听清了交回字（第 3 步：太短的、没把握的不交）。
+fn understand(core: &Core, audio: &[f32]) -> Option<String> {
     let wav = audio::write_wav(audio, u32::try_from(RATE).unwrap_or(16_000));
     let heard = blobs::put(core, &wav, "heard.wav", "audio/wav")
         .map_err(|error| error.to_string())
@@ -191,14 +238,12 @@ fn understand(core: &Core, audio: &[f32]) {
             .map_err(|error| error.to_string())
         });
     match heard {
-        Ok(answer) if answer["clear"] == true => {
-            eprintln!(
-                "miyu-voice-assistant: heard \"{}\"",
-                answer["text"].as_str().unwrap_or_default()
-            );
+        Ok(answer) if answer["clear"] == true => answer["text"].as_str().map(str::to_string),
+        Ok(_) => None,
+        Err(why) => {
+            eprintln!("miyu-voice-assistant: stt: {why}");
+            None
         }
-        Ok(_) => eprintln!("miyu-voice-assistant: did not catch that"),
-        Err(why) => eprintln!("miyu-voice-assistant: stt: {why}"),
     }
 }
 

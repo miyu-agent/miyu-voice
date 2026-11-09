@@ -8,3 +8,4 @@
 | 结果：存好了 | 同上 | 调了以后 | 约 25 | `Saved audio/say-<哈希>.mp3 (2.3 s).`：相对工作区的路径（她接着发、展示要用）、时长（她判断长不长）；文件名用内容哈希，同样的字同样的声音不重复存 |
 | 报错：参数、工作区 | 同上 | 调错时 | 3、6 | `Give text.`、`No workspace for this turn.` |
 | 报错：合成 | `crates/miyu-say/src/say.rs`、`engine.rs`、各家引擎 | 合成不了时 | 约 9～15 | `There is nothing to say in this text.`（转写后是空的）、`The text is longer than 5000 characters.`、`The MiniMax API key is not set.` 这类没配好的、云端回的原因照转（只带主机名和对方的话，不带 key） |
+| 助手的场所里「念出来」的事实 | `crates/miyu-voice-assistant/src/conversation.rs` 的 `SPOKEN_FACT` | 场所会话第一次造的时候记一条（`session.note`，kind `voice`），之后一直在上下文里 | 22 | 设计 20 第九节「告诉她这一轮是念出来的」：只客观写明回答会念给对方听、对方看不到文字（26「描述不指挥」），不写「说短一点」「别用列表」这类，那归人格。没写的话她会照屏幕的习惯写表格、代码块：念的那一头只能念「一张表」「一段代码」。只记一次、不每轮重复，前缀缓存不动 |

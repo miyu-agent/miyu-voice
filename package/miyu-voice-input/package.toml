@@ -10,6 +10,8 @@ name = { en = "Voice input", zh = "语音输入", ja = "音声入力" }
 summary = { en = "Turns speech into text on this computer: the microphone in the terminal and web, voice messages in chats", zh = "在这台电脑上把说的话转成字：终端、网页的麦克风，聊天里的语音消息", ja = "このコンピューターで話した言葉を文字にします：ターミナルとウェブのマイク、チャットの音声メッセージ" }
 upstream = "https://github.com/miyu-agent/miyu-voice"
 icon = "mic"
+# 配置键是 voice-input.*（不写是包的编号，太长；程序照这个前缀读）。
+prefix = "voice-input"
 
 # 扩展必写：miyu voice-input 印模型下好没有、用的哪个麦克风（设计 20 第五节「配置页」的那几样，查问题用）。
 [command]
