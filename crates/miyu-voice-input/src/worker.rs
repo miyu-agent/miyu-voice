@@ -54,11 +54,17 @@ impl Workers {
     ///
     /// 子进程认不了（太长、语言不对、模型坏了），或者拉不起来、半路死了。
     pub fn transcribe(&self, pcm: &Pcm, language: &str) -> Result<Heard, Refused> {
-        let request = json!({
-            "language": language,
-            "wav": STANDARD.encode(audio::write_wav(&pcm.samples, pcm.rate)),
-        })
-        .to_string();
+        self.transcribe_wav(&audio::write_wav(&pcm.samples, pcm.rate), language)
+    }
+
+    /// 同 [`Workers::transcribe`]，交的是 wav 文件的字节：主进程不解码，原样交给子进程（施工 VO-9 实测：主进程解一段
+    /// 两分多钟的录音，常驻涨到 47 MB、不还给系统）。
+    ///
+    /// # Errors
+    ///
+    /// 同上；读不出来的 wav 子进程照 `engine` 回。
+    pub fn transcribe_wav(&self, wav: &[u8], language: &str) -> Result<Heard, Refused> {
+        let request = json!({"language": language, "wav": STANDARD.encode(wav)}).to_string();
         let mut running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
         for _ in 0..2 {
             if running.is_none() {

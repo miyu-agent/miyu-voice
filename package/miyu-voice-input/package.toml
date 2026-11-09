@@ -27,3 +27,30 @@ capabilities = ["audio.record", "network", "packages.call"]
 [export]
 provides = ["stt"]
 methods = ["stt.transcribe", "stt.record", "stt.stop"]
+
+# 配置页（设计 20 第五节「配置页」）：识别语言、用哪个麦克风、换社区的引擎。键是 voice-input.*。
+
+[settings.language]
+type = "option"
+choices = ["zh", "yue", "en", "ja", "ko", "auto"]
+default = "zh"
+layers = ["system"]
+applies = "now"
+name = { en = "Language", zh = "识别语言", ja = "認識する言語" }
+description = { en = "zh: Mandarin, yue: Cantonese. auto guesses, and sometimes takes Mandarin for Japanese.", zh = "zh 普通话，yue 粤语。auto 自己猜，会把普通话猜成日语。", ja = "zh は標準中国語、yue は広東語。auto は推測しますが、標準中国語を日本語と間違えることがあります。" }
+
+[settings.microphone]
+type = "text"
+max = 200
+layers = ["system"]
+applies = "now"
+name = { en = "Microphone", zh = "麦克风", ja = "マイク" }
+description = { en = "The device name. Empty: the system default.", zh = "设备名。不填用系统默认的。", ja = "デバイス名。空欄はシステムの既定。" }
+
+[settings.engine]
+type = "text"
+max = 100
+layers = ["system"]
+applies = "now"
+name = { en = "Engine", zh = "引擎", ja = "エンジン" }
+description = { en = "Empty: SenseVoice on this computer. Or the id of an installed package that plugs into stt.engine.", zh = "不填：本机的 SenseVoice。或者填一个接进 stt.engine 的、装着的包的编号。", ja = "空欄はこのコンピューターの SenseVoice。stt.engine に接続するインストール済みパッケージの ID も指定できます。" }

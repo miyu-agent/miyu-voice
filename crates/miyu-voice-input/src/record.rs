@@ -32,7 +32,6 @@ pub struct Stopper {
 
 impl Stopper {
     /// 叫停；交回有没有在录的。
-    #[expect(dead_code, reason = "VO-9 登记 stt.stop 时用")]
     pub fn stop(&self) -> bool {
         let recording = self.recording.load(Ordering::SeqCst);
         if recording {

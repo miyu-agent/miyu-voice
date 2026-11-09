@@ -138,7 +138,7 @@ impl Recognizer {
 }
 
 /// 转成 16 kHz。
-fn resampled(pcm: &Pcm) -> Result<Vec<f32>, Refused> {
+pub fn resampled(pcm: &Pcm) -> Result<Vec<f32>, Refused> {
     if pcm.rate == RATE {
         return Ok(pcm.samples.clone());
     }

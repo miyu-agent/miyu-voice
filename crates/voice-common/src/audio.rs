@@ -70,6 +70,21 @@ pub fn read_wav(bytes: &[u8]) -> Result<Pcm, BadAudio> {
     })
 }
 
+/// 只看 wav 的头读不读得出来、不解样本：交给别的进程解之前先挡掉明显不是 wav 的（`bad_audio`）。
+///
+/// # Errors
+///
+/// 不是 wav、头坏了、没有声道。
+pub fn check_wav(bytes: &[u8]) -> Result<(), BadAudio> {
+    let reader = hound::WavReader::new(Cursor::new(bytes))
+        .map_err(|error| BadAudio(format!("Not a readable WAV file: {error}.")))?;
+    let spec = reader.spec();
+    if spec.channels == 0 || spec.sample_rate == 0 {
+        return Err(BadAudio("The WAV file has no channels.".to_string()));
+    }
+    Ok(())
+}
+
 /// 单声道、16 位 PCM 的 wav 文件的字节：交给社区引擎（设计 20 第三节 `stt.engine.transcribe`）、测试造数据用。
 #[must_use]
 pub fn write_wav(samples: &[f32], rate: u32) -> Vec<u8> {

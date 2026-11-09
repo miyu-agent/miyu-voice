@@ -803,7 +803,7 @@ dependencies = [
 [[package]]
 name = "miyu-ext"
 version = "0.1.0"
-source = "git+https://github.com/miyu-agent/miyu-sdk?rev=e20689bb74251bc731ec6205cbcd3ecaf2e39821#e20689bb74251bc731ec6205cbcd3ecaf2e39821"
+source = "git+https://github.com/miyu-agent/miyu-sdk?rev=05216a900e2980758069a7d060b4c43e760d7c6b#05216a900e2980758069a7d060b4c43e760d7c6b"
 dependencies = [
  "serde_json",
 ]

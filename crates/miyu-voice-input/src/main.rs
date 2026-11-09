@@ -12,6 +12,7 @@ mod model;
 mod recognize;
 mod record;
 mod segment;
+mod service;
 mod worker;
 
 use std::path::PathBuf;
@@ -40,12 +41,17 @@ fn main() -> ExitCode {
 }
 
 fn serve() {
+    let Some(cache) = cache_dir() else {
+        eprintln!("miyu-voice-input: MIYU_CACHE_DIR is not set");
+        std::process::exit(miyu_ext::EXIT_CONFIG);
+    };
+    let service = service::Service::new(cache.clone());
     let mut ext = Extension::new("miyu-voice-input", env!("CARGO_PKG_VERSION"));
-    ext.ready(|_core| {
-        let Some(cache) = cache_dir() else {
-            eprintln!("miyu-voice-input: MIYU_CACHE_DIR is not set");
-            return;
-        };
+    service.register(&mut ext);
+    let on_ready = std::sync::Arc::clone(&service);
+    ext.ready(move |core| {
+        on_ready.reload(core);
+        // 模型下好、校验过才登记 stt.*（设计 20 第五节）：没下好的先下，头这时还画不出麦克风。
         let model = Model::in_cache(&cache);
         if !model.ready() {
             eprintln!(
@@ -54,9 +60,16 @@ fn serve() {
             );
             if let Err(why) = fetch::download(&model, |_| {}) {
                 eprintln!("miyu-voice-input: {why}");
+                return;
             }
         }
+        if let Err(error) = core.enable_methods(&service::METHODS) {
+            eprintln!("miyu-voice-input: package.methods failed: {error}");
+        }
     });
+    // 配置推送的处理跑在读核心回应的线程上（开发包 0.1，SDK-2 前）：里面不调核心，只重读。
+    let on_config = std::sync::Arc::clone(&service);
+    ext.on_config(move |_, core| on_config.reload(core));
     ext.run();
 }
 
