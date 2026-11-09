@@ -27,6 +27,9 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           add-rust-environment-hash-key: false
+      - name: 取 sherpa-onnx 的静态库（照 tools/sherpa-onnx.lock 校验）
+        shell: bash
+        run: tools/sherpa-lib.sh
       - name: 格式
         run: cargo fmt --check
       - name: clippy

@@ -8,6 +8,8 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+# wav 的读写（纯 Rust）：stt.transcribe 收 wav（设计 20 第三节「形状」）。
+hound = "3.5.1"
 
 [lints]
 workspace = true

@@ -15,4 +15,14 @@ miyu pkg install miyu-voice-input       # 只要语音转字
 
 想换引擎的不用换包：社区包照 `stt.engine`、`tts.engine` 接进来（设计 `67-总线.md`），装上以后在包的配置页里多一项。
 
+## 第三方
+
+| 用到的 | 怎么用 | 许可证 |
+|---|---|---|
+| [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)（k2-fsa） | 静态链进 `miyu-voice-input`：本机识别 | Apache-2.0 |
+| [ONNX Runtime](https://github.com/microsoft/onnxruntime)（随 sherpa-onnx 的预编译库） | 静态链进 `miyu-voice-input` | MIT |
+| [SenseVoice-Small](https://github.com/FunAudioLLM/SenseVoice)（FunAudioLLM，sherpa-onnx 转的 int8 版） | 不随包发：`miyu-voice-input` 第一次启动时从 sherpa-onnx 的 Release 下载，对照钉死的 SHA-256 校验 | FunASR 模型许可（[MODEL_LICENSE](https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE)） |
+
+Apache-2.0、MIT 和本仓库的 AGPL-3.0 能放在一起发；发包时把它们的许可证文本一起带上。
+
 还在施工，没发版。许可证 AGPL-3.0-or-later。

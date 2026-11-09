@@ -6,7 +6,8 @@
 2. **设计在核心仓库**：`docs/designs/20-语音.md`（三个包、总线上的名字和每个方法的形状），`docs/designs/67-总线.md`（`provides`、`plugs`、`bus.call`）。这里的 `docs/` 只放施工单和登记簿。
 3. **包之间只照名字调**：`miyu-voice-assistant` 调 `stt`、`tts`，不写 `miyu-voice-input`、`miyu-say` 的包名；社区引擎照 `stt.engine`、`tts.engine` 接。头和 IM 也只认名字。
 4. **给模型看的字**（`say` 工具的说明、参数、结果）写英文短句，一件工具最多三句；每一处都记进 `docs/prompt-ledger.md`。给人看的字（清单里的名字、配置项）三种语言。
-5. **三个平台**：Linux、macOS（M 系列）、Windows 都要能编、能跑；CI 三台。测试不靠跑测试的机器有麦克风、音箱、网络：录音、放音、云端合成都隔在一层后面，测试换成假的。
-6. **文件规模**：每个 `.rs` 不超过 500 行（测试也算）；测试放各模块的 `tests.rs`。
-7. **一步一个分支**：`step/<编号>-<几个字>`，三台 CI 绿了先交 c0（`miyu-agent-c0`）复核，再交 core1 合。碰头（终端、网页）的交 miyu-heads，碰 IM 的交 miyu-im，这里只出协议形状。
-8. **旧版只当证据**：旧版 Miyu 0.7.4 的语音代码（唤醒规程、过滤、麦克风接线的教训）可以照着推，代码不整块搬。
+5. **sherpa-onnx 的库**：先跑 `tools/sherpa-lib.sh`（Windows 没有 bash 的跑 `tools/sherpa-lib.ps1`），照 `tools/sherpa-onnx.lock` 钉死的 SHA-256 下好、校验；`.cargo/config.toml` 一直指着那里，没跑的编不过，不让 sherpa-onnx-sys 自己下。运行时下的识别模型同样钉 SHA-256（`crates/miyu-voice-input/src/model.rs`）。
+6. **三个平台**：Linux、macOS（M 系列）、Windows 都要能编、能跑；CI 三台。测试不靠跑测试的机器有麦克风、音箱、网络：录音、放音、云端合成都隔在一层后面，测试换成假的。
+7. **文件规模**：每个 `.rs` 不超过 500 行（测试也算）；测试放各模块的 `tests.rs`。
+8. **一步一个分支**：`step/<编号>-<几个字>`，三台 CI 绿了交 core1 复核、合（附自查清单；主人另定复核人以前都由 core1，2026-11-09）。碰头（终端、网页）的交 miyu-heads，碰 IM 的交 miyu-im，这里只出协议形状。
+9. **旧版只当证据**：旧版 Miyu 0.7.4 的语音代码（唤醒规程、过滤、麦克风接线的教训）可以照着推，代码不整块搬。

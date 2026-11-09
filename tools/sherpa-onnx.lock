@@ -1,0 +1,7 @@
+# sherpa-onnx 预编译静态库：版本和每个平台的 SHA-256，只写在这一处（tools/sherpa-lib.sh、tools/sherpa-lib.ps1 都读它）。
+# 升级：改这里的版本和三行 SHA-256（GitHub 的 Release 页上每个文件都记着），和 crates/miyu-voice-input/Cargo.toml 钉的
+# sherpa-onnx 版本一起改。格式：<平台> <文件名里平台那段> <SHA-256>
+version 2.0.1
+linux-x86_64 linux-x64-static-lib 55cfadf65ba50d0afc1a802b7a337942819e51c94a5b5a384def1978f7c70871
+macos-aarch64 osx-arm64-static-lib d7a9b14f337958e7373c8c650f046df33d210bbaff2f33cb8322dda663ee5e1c
+windows-x86_64 win-x64-static-MT-Release-lib 23e7b986b197eda0bbc47ff3d7d5c87afd6ef2b9077214ba26b0f1ec52ef0e66

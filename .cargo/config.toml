@@ -1,0 +1,8 @@
+# sherpa-onnx 的静态库一直从 target/sherpa-onnx/lib 拿：由 tools/sherpa-lib.sh（Windows 另有 .ps1）照钉死的 SHA-256 下好、
+# 校验、解开。没跑脚本的编不过（sherpa-onnx-sys 报这个目录不在），不退回成它自己下、不验校验和（core1 11-09）。
+[env]
+SHERPA_ONNX_LIB_DIR = { value = "target/sherpa-onnx/lib", relative = true }
+
+# sherpa-onnx 的 Windows 静态库是 /MT 编的（静态 C 运行库），程序得跟着静态链，不然链接时两份运行库对不上。
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

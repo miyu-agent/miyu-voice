@@ -32,6 +32,7 @@ jobs:
       build: |
         set -euo pipefail
         rustup toolchain install
+        tools/sherpa-lib.sh
         cargo build --release --locked -p miyu-voice-input --bin miyu-voice-input
         exe=""
         if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
@@ -66,6 +67,7 @@ jobs:
       build: |
         set -euo pipefail
         rustup toolchain install
+        tools/sherpa-lib.sh
         cargo build --release --locked -p miyu-say --bin miyu-say
         exe=""
         if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
@@ -100,6 +102,7 @@ jobs:
       build: |
         set -euo pipefail
         rustup toolchain install
+        tools/sherpa-lib.sh
         cargo build --release --locked -p miyu-voice-assistant --bin miyu-voice-assistant
         exe=""
         if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
