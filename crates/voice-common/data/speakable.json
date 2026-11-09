@@ -1,0 +1,6 @@
+{
+  "_": "设计 20 第四节的转写用词：念不出来的东西念成什么。照念的那段话的语言挑（有假名的日语、有汉字的中文，别的英语）。改了照 tests.rs 的例子对一遍。",
+  "zh": { "code": "一段代码", "table": "一张表", "sentence_end": "。" },
+  "en": { "code": "a code block", "table": "a table", "sentence_end": "." },
+  "ja": { "code": "コードブロック", "table": "表", "sentence_end": "。" }
+}

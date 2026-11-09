@@ -10,6 +10,10 @@ publish.workspace = true
 [dependencies]
 # wav 的读写（纯 Rust）：stt.transcribe 收 wav（设计 20 第三节「形状」）。
 hound = "3.5.1"
+# Markdown 转成念得出来的话（设计 20 第四节）：同 miyu-render 用的那一版，不要它的 HTML 输出。
+pulldown-cmark = { version = "0.13.5", default-features = false }
+# 转写用词是数据（data/speakable.json，设计 20 第四节「转写规则是数据」）。
+serde_json = "1"
 
 [lints]
 workspace = true

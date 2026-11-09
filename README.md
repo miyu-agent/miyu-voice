@@ -21,8 +21,10 @@ miyu pkg install miyu-voice-input       # 只要语音转字
 |---|---|---|
 | [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)（k2-fsa） | 静态链进 `miyu-voice-input`：本机识别 | Apache-2.0 |
 | [ONNX Runtime](https://github.com/microsoft/onnxruntime)（随 sherpa-onnx 的预编译库） | 静态链进 `miyu-voice-input` | MIT |
+| [rodio](https://github.com/RustAudio/rodio)、[cpal](https://github.com/RustAudio/cpal) | 编进程序：录音、放音 | MIT 或 Apache-2.0、Apache-2.0 |
+| [Symphonia](https://github.com/pdeljanov/Symphonia)（随 rodio） | 编进 `miyu-say`：解 mp3、wav | MPL-2.0 |
 | [SenseVoice-Small](https://github.com/FunAudioLLM/SenseVoice)（FunAudioLLM，sherpa-onnx 转的 int8 版） | 不随包发：`miyu-voice-input` 第一次启动时从 sherpa-onnx 的 Release 下载，对照钉死的 SHA-256 校验 | FunASR 模型许可（[MODEL_LICENSE](https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE)） |
 
-Apache-2.0、MIT 和本仓库的 AGPL-3.0 能放在一起发；发包时把它们的许可证文本一起带上。
+Apache-2.0、MIT、MPL-2.0 和本仓库的 AGPL-3.0 能放在一起发（MPL-2.0 照文件算，改了它的文件要照它公开）；发包时把它们的许可证文本一起带上。
 
 还在施工，没发版。许可证 AGPL-3.0-or-later。
