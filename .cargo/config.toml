@@ -6,3 +6,7 @@ SHERPA_ONNX_LIB_DIR = { value = "target/sherpa-onnx/lib", relative = true }
 # sherpa-onnx 的 Windows 静态库是 /MT 编的（静态 C 运行库），程序得跟着静态链，不然链接时两份运行库对不上。
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
+
+[alias]
+# cargo xtask licenses、cargo xtask notices：见 xtask/src/main.rs。
+xtask = "run --quiet --package xtask --"

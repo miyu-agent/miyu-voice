@@ -43,6 +43,9 @@ jobs:
           RUSTDOCFLAGS: -D warnings
       - name: 测试
         run: cargo test --locked --no-fail-fast
+      - name: 许可证（第三方依赖合得到一起、THIRD-PARTY-LICENSES.txt 是最新的）
+        if: runner.os == 'Linux'
+        run: cargo xtask licenses
       - name: 行数（每个 .rs 不超过 500 行，测试也算）
         if: runner.os == 'Linux'
         shell: bash

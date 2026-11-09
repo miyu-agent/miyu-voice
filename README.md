@@ -25,6 +25,6 @@ miyu pkg install miyu-voice-input       # 只要语音转字
 | [Symphonia](https://github.com/pdeljanov/Symphonia)（随 rodio） | 编进 `miyu-say`：解 mp3、wav | MPL-2.0 |
 | [SenseVoice-Small](https://github.com/FunAudioLLM/SenseVoice)（FunAudioLLM，sherpa-onnx 转的 int8 版） | 不随包发：`miyu-voice-input` 第一次启动时从 sherpa-onnx 的 Release 下载，对照钉死的 SHA-256 校验 | FunASR 模型许可（[MODEL_LICENSE](https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE)） |
 
-Apache-2.0、MIT、MPL-2.0 和本仓库的 AGPL-3.0 能放在一起发（MPL-2.0 照文件算，改了它的文件要照它公开）；发包时把它们的许可证文本一起带上。
+Apache-2.0、MIT、MPL-2.0 和本仓库的 AGPL-3.0 能放在一起发（MPL-2.0 照文件算，改了它的文件要照它公开）。每个包都带 `THIRD-PARTY-LICENSES.txt`：编进程序的每个第三方包、sherpa-onnx 静态链进来的 C++ 库（`licenses/native.txt`）的许可证原文；`cargo xtask notices` 重新生成，`cargo xtask licenses` 查（CI 跑）。
 
 还在施工，没发版。许可证 AGPL-3.0-or-later。
