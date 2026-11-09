@@ -1,0 +1,20 @@
+[package]
+name = "miyu-say"
+description = "朗读（设计 20 第六节）：云端合成，在总线上提供 tts、say 工具、miyu say。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "miyu-say"
+path = "src/main.rs"
+
+[dependencies]
+miyu-ext.workspace = true
+serde_json.workspace = true
+voice-common.workspace = true
+
+[lints]
+workspace = true

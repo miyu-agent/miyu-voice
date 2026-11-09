@@ -1,0 +1,29 @@
+# 语音输入（设计：核心仓库 docs/designs/20-语音.md 第五节）。本机 CPU 识别说的话，在总线上提供 stt；
+# 终端、网页的麦克风和 IM 的语音转字都照名字调它（设计 67），不认这个包名。
+
+[package]
+version = "0.1.0"
+# 带本机程序：一种系统一个包文件（.github/workflows/release.yml）。
+targets = ["linux-x86_64", "macos-aarch64", "windows-x86_64"]
+protocol = [1, 1]
+name = { en = "Voice input", zh = "语音输入", ja = "音声入力" }
+summary = { en = "Turns speech into text on this computer: the microphone in the terminal and web, voice messages in chats", zh = "在这台电脑上把说的话转成字：终端、网页的麦克风，聊天里的语音消息", ja = "このコンピューターで話した言葉を文字にします：ターミナルとウェブのマイク、チャットの音声メッセージ" }
+upstream = "https://github.com/miyu-agent/miyu-voice"
+icon = "mic"
+
+# 扩展必写：miyu voice-input 印模型下好没有、用的哪个麦克风（设计 20 第五节「配置页」的那几样，查问题用）。
+[command]
+name = "voice-input"
+program = "miyu-voice-input"
+about = { en = "Voice input: model and microphone status", zh = "语音输入：模型、麦克风的情况", ja = "音声入力：モデルとマイクの状態" }
+
+[process]
+args = ["serve"]
+start = "always"
+# audio.record：录本机麦克风（stt.record）；network：第一次启动下载识别模型；packages.call：调社区的 stt.engine。
+capabilities = ["audio.record", "network", "packages.call"]
+
+# 总线（设计 67）：模型下好、校验过才登记这三个方法，头这时才画麦克风（设计 20 第五节）。
+[export]
+provides = ["stt"]
+methods = ["stt.transcribe", "stt.record", "stt.stop"]

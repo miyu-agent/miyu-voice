@@ -1,0 +1,112 @@
+# 发包（照官方软件源的打包模板，同 miyu-im）：推 `v*` 标签（`v` 加上三份清单里同一个 `version`）时，三个包一种系统各打一个
+# `.miyu`，传进这个标签的 Release；官方软件源每天收一次。系统照清单的 `targets`：三台 CI 测过的那三种。
+# 每个包都带本仓库的 `LICENSE`。手动跑（workflow_dispatch，在 `step/**` 上试打）照样编、打包，`.miyu` 放进这一趟的产物，不建 Release。
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  # 包里：清单、bin/miyu-voice-input。识别模型第一次启动时下载，不进包（设计 20 第五节）。
+  input:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux-x86_64
+          - os: macos-latest
+            target: macos-aarch64
+          - os: windows-latest
+            target: windows-x86_64
+    uses: miyu-agent/packages/.github/workflows/pack.yml@main
+    permissions:
+      contents: write
+    with:
+      package: miyu-voice-input
+      folder: dist/miyu-voice-input
+      target: ${{ matrix.target }}
+      runs-on: ${{ matrix.os }}
+      build: |
+        set -euo pipefail
+        rustup toolchain install
+        cargo build --release --locked -p miyu-voice-input --bin miyu-voice-input
+        exe=""
+        if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
+        rm -rf dist/miyu-voice-input && mkdir -p dist/miyu-voice-input/bin
+        cp package/miyu-voice-input/package.toml dist/miyu-voice-input/
+        cp "target/release/miyu-voice-input$exe" dist/miyu-voice-input/bin/
+        cp LICENSE dist/miyu-voice-input/
+        for need in package.toml "bin/miyu-voice-input$exe" LICENSE; do
+          [ -f "dist/miyu-voice-input/$need" ] || { echo "包里少了 miyu-voice-input/$need"; exit 1; }
+        done
+
+  # 包里：清单、bin/miyu-say。
+  say:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux-x86_64
+          - os: macos-latest
+            target: macos-aarch64
+          - os: windows-latest
+            target: windows-x86_64
+    uses: miyu-agent/packages/.github/workflows/pack.yml@main
+    permissions:
+      contents: write
+    with:
+      package: miyu-say
+      folder: dist/miyu-say
+      target: ${{ matrix.target }}
+      runs-on: ${{ matrix.os }}
+      build: |
+        set -euo pipefail
+        rustup toolchain install
+        cargo build --release --locked -p miyu-say --bin miyu-say
+        exe=""
+        if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
+        rm -rf dist/miyu-say && mkdir -p dist/miyu-say/bin
+        cp package/miyu-say/package.toml dist/miyu-say/
+        cp "target/release/miyu-say$exe" dist/miyu-say/bin/
+        cp LICENSE dist/miyu-say/
+        for need in package.toml "bin/miyu-say$exe" LICENSE; do
+          [ -f "dist/miyu-say/$need" ] || { echo "包里少了 miyu-say/$need"; exit 1; }
+        done
+
+  # 包里：清单、bin/miyu-voice-assistant。唤醒词、人声检测的模型第一次启动时下载（施工 VO-11 定）。
+  assistant:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux-x86_64
+          - os: macos-latest
+            target: macos-aarch64
+          - os: windows-latest
+            target: windows-x86_64
+    uses: miyu-agent/packages/.github/workflows/pack.yml@main
+    permissions:
+      contents: write
+    with:
+      package: miyu-voice-assistant
+      folder: dist/miyu-voice-assistant
+      target: ${{ matrix.target }}
+      runs-on: ${{ matrix.os }}
+      build: |
+        set -euo pipefail
+        rustup toolchain install
+        cargo build --release --locked -p miyu-voice-assistant --bin miyu-voice-assistant
+        exe=""
+        if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
+        rm -rf dist/miyu-voice-assistant && mkdir -p dist/miyu-voice-assistant/bin
+        cp package/miyu-voice-assistant/package.toml dist/miyu-voice-assistant/
+        cp "target/release/miyu-voice-assistant$exe" dist/miyu-voice-assistant/bin/
+        cp LICENSE dist/miyu-voice-assistant/
+        for need in package.toml "bin/miyu-voice-assistant$exe" LICENSE; do
+          [ -f "dist/miyu-voice-assistant/$need" ] || { echo "包里少了 miyu-voice-assistant/$need"; exit 1; }
+        done

@@ -1,0 +1,28 @@
+# 朗读（设计：核心仓库 docs/designs/20-语音.md 第六节）。云端合成（MiniMax、MiMo、OpenAI 兼容），在总线上提供 tts；
+# 朗读按钮、自动朗读、语音助手、她的 say 工具都经它出声。
+
+[package]
+version = "0.1.0"
+targets = ["linux-x86_64", "macos-aarch64", "windows-x86_64"]
+protocol = [1, 1]
+name = { en = "Say", zh = "朗读", ja = "読み上げ" }
+summary = { en = "Reads replies aloud with a cloud voice; she can speak and send voice messages", zh = "用云端的声音把回复念出来；她能说话、能发语音", ja = "クラウドの声で返信を読み上げます。AI が話したり音声メッセージを送ったりできます" }
+upstream = "https://github.com/miyu-agent/miyu-voice"
+icon = "volume-2"
+
+# miyu say <文字>：用当前人格的声音从本机音箱念；-o 存成文件；--file 放一个现成的音频（设计 20 第六节）。
+[command]
+name = "say"
+program = "miyu-say"
+about = { en = "Read text aloud", zh = "把字念出来", ja = "文字を読み上げる" }
+
+[process]
+args = ["serve"]
+start = "always"
+# tools：say 工具；audio.play：从本机音箱放；network：调云端合成；packages.call：调社区的 tts.engine。永远不要麦克风。
+capabilities = ["tools", "audio.play", "network", "packages.call"]
+
+# 总线（设计 67）：选的引擎配好了才登记（设计 20 第三节「登记了才算可用」）。
+[export]
+provides = ["tts"]
+methods = ["tts.synthesize", "tts.play", "tts.stop"]

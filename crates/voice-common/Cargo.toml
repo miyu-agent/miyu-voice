@@ -1,0 +1,13 @@
+[package]
+name = "voice-common"
+description = "三个语音包共用的：整机的麦克风锁、音频解码重采样、可念的文字（设计 20）。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

@@ -1,0 +1,20 @@
+[package]
+name = "miyu-voice-input"
+description = "语音输入（设计 20 第五节）：本机识别，在总线上提供 stt。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "miyu-voice-input"
+path = "src/main.rs"
+
+[dependencies]
+miyu-ext.workspace = true
+serde_json.workspace = true
+voice-common.workspace = true
+
+[lints]
+workspace = true
