@@ -10,7 +10,7 @@ use std::time::Duration;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample};
 use voice_common::audio::Pcm;
-use voice_common::mic_lock::{Busy, MicLock};
+use voice_common::mic_lock::{LockError, MicLock};
 
 use crate::endpoint::{Ended, Endpoint, FRAME_MS};
 
@@ -53,7 +53,12 @@ pub fn record(
     max_ms: u64,
     stopper: &Stopper,
 ) -> Result<(Pcm, Ended), RecordError> {
-    let _lock = MicLock::for_dictation().map_err(|Busy| RecordError::MicBusy)?;
+    let _lock = MicLock::for_dictation().map_err(|error| match error {
+        LockError::Busy => RecordError::MicBusy,
+        LockError::Unsafe(why) => RecordError::NoMicrophone(format!(
+            "The microphone lock folder is not safe to use: {why}."
+        )),
+    })?;
     let host = cpal::default_host();
     let chosen = device.and_then(|name| {
         host.input_devices().ok()?.find(|found| {
