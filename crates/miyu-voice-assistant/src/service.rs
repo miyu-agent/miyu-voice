@@ -169,25 +169,7 @@ impl Service {
             Err(why) => eprintln!("miyu-voice-assistant: {why}"),
         }
         let (utterances, heard) = mpsc::channel::<Vec<f32>>();
-        let worker_core = core.clone();
-        let service = Arc::clone(self);
-        std::thread::spawn(move || {
-            for audio in heard {
-                let Some(text) = understand(&worker_core, &audio) else {
-                    continue;
-                };
-                match service.conversation() {
-                    Some(conversation) => {
-                        if let Err(why) = conversation.say(&worker_core, &text) {
-                            eprintln!("miyu-voice-assistant: {why}");
-                        }
-                    }
-                    None => {
-                        eprintln!("miyu-voice-assistant: heard \"{text}\" but there is no session");
-                    }
-                }
-            }
-        });
+        self.understand_in_turn(core, heard);
         let service = Arc::clone(self);
         let barge_core = core.clone();
         let microphone = Some(settings.microphone.clone()).filter(|name| !name.is_empty());
@@ -217,6 +199,8 @@ impl Service {
                 for event in listener.feed(frame) {
                     match event {
                         Event::Wake { rest, .. } => {
+                            let core = barge_core.clone();
+                            std::thread::spawn(move || warm_up(&core));
                             chime::play(&service.speaker, Chime::Wake);
                             if rest.is_empty() {
                                 awaiting = Some(Instant::now());
@@ -241,6 +225,57 @@ impl Service {
                 }
             });
         });
+    }
+
+    /// 认字的那个线程：一句句交 `stt`、交给会话（认的时候收麦照常，不漏声音）。
+    fn understand_in_turn(self: &Arc<Service>, core: &Core, heard: mpsc::Receiver<Vec<f32>>) {
+        let worker_core = core.clone();
+        let service = Arc::clone(self);
+        std::thread::spawn(move || {
+            // 量时延（施工 VO-13下）：设了 MIYU_VOICE_MEASURE 的，一句话认字、交给会话各用了多久印进日志。
+            let measure = std::env::var_os("MIYU_VOICE_MEASURE").is_some();
+            for audio in heard {
+                let started = Instant::now();
+                let Some(text) = understand(&worker_core, &audio) else {
+                    continue;
+                };
+                let heard_at = started.elapsed();
+                match service.conversation() {
+                    Some(conversation) => {
+                        if let Err(why) = conversation.say(&worker_core, &text) {
+                            eprintln!("miyu-voice-assistant: {why}");
+                        }
+                        if measure {
+                            eprintln!(
+                                "miyu-voice-assistant: measure: {} ms of speech, stt {} ms, sent {} ms",
+                                audio.len() * 1000 / RATE,
+                                heard_at.as_millis(),
+                                started.elapsed().as_millis()
+                            );
+                        }
+                    }
+                    None => {
+                        eprintln!("miyu-voice-assistant: heard \"{text}\" but there is no session");
+                    }
+                }
+            }
+        });
+    }
+}
+
+/// 叫醒的那一刻先让识别把模型加载起来：交一段 0.6 秒、几乎没声音的录音（过得了「短于 0.5 秒不认」，认不出字）。语音输入的
+/// 识别在子进程里，闲了就退，叫醒以后头一句要先等它加载（施工 VO-13下实测：3 秒的话认了 2.1 秒，热的时候 0.2 秒）；你说那
+/// 句话的工夫它就加载好了。没装、没起来的不管。
+fn warm_up(core: &Core) {
+    let hush: Vec<f32> = (0..RATE * 6 / 10)
+        .map(|n| if n % 2 == 0 { 0.0001 } else { -0.0001 })
+        .collect();
+    let wav = audio::write_wav(&hush, u32::try_from(RATE).unwrap_or(16_000));
+    if let Ok(blob) = blobs::put(core, &wav, "warm-up.wav", "audio/wav") {
+        let _ = core.call(
+            "bus.call",
+            json!({"name": "stt", "method": "transcribe", "params": {"audio": blob}}),
+        );
     }
 }
 

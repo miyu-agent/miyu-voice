@@ -236,6 +236,9 @@ fn speak_in_turn(core: Core, switches: Switches, turn: Turn, queue: mpsc::Receiv
                     if mute || generation != turn.generation.load(Ordering::SeqCst) {
                         continue;
                     }
+                    if std::env::var_os("MIYU_VOICE_MEASURE").is_some() {
+                        eprintln!("miyu-voice-assistant: measure: speaking \"{sentence}\"");
+                    }
                     switches.speaking.store(true, Ordering::SeqCst);
                     let played = core.call(
                         "bus.call",
