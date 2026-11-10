@@ -1,9 +1,9 @@
-//! 跑着的助手（设计 20 第九节）：读配置、一直收着麦交给听的那一套；听到唤醒词（或者有人敲了 `miyu listen`、按了绑它的
-//! 热键）响一声，唤醒词后面那句（或者唤醒以后 8 秒内说的下一句）交总线上的 `stt` 认成字，交给场所会话里的她，她的回答
-//! 一句句念出来（[`crate::conversation`]）；念完 30 秒内接着说不用再叫她。
+//! 跑着的助手（设计 20 第九节）：读配置、一直收着麦交给听的那一套；听到唤醒词响一声，唤醒词后面那句（或者唤醒以后 8 秒内
+//! 说的下一句）交总线上的 `stt` 认成字，交给场所会话里的她，她的回答一句句念出来（[`crate::conversation`]）；念完 30 秒内
+//! 接着说不用再叫她。
 //!
-//! 包装着、没停用就一直听唤醒词（项目主人 2026-11-10 定）：不想让它听的，在软件包里把它停用。`miyu listen` 不是开关，是
-//! 「现在就叫她」，同喊了唤醒词。
+//! 包装着、没停用就一直听唤醒词（项目主人 2026-11-10 定）：不想让它听的，在软件包里把它停用。`miyu listen` 开关的是对话：
+//! 开了响一声，说什么都交给她、不用唤醒词、不计时，直到再关；关了响另一声，她还在想、在说的打断，回到只等唤醒词。
 
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -23,7 +23,7 @@ use crate::listen::{Event, Listener, RATE, Sensitivity};
 use crate::models::Models;
 use crate::reply::Reply;
 
-/// 唤醒以后等下一句多久（只说了唤醒词的、敲了 `miyu listen` 的）：这么久还没开口就不等了，开了口的等这一句说完。
+/// 唤醒以后等下一句多久（只说了唤醒词的）：这么久还没开口就不等了，开了口的等这一句说完。
 const AWAIT: Duration = Duration::from_secs(8);
 /// 默认的唤醒词（设计 20 第九节：Miyu 的名字的几种念法）。
 pub const DEFAULT_WAKE_WORDS: [&str; 4] = ["未有未有", "密友密友", "miyumiyu", "みゆみゆ"];
@@ -108,9 +108,8 @@ impl Service {
     /// 登记给自己的命令行用的 `listen`（不上总线）。
     pub fn register(self: &Arc<Service>, ext: &mut miyu_ext::Extension) {
         let service = Arc::clone(self);
-        ext.method_with(Method::new("listen"), move |_, _, core| {
-            service.wake(core);
-            Ok::<_, MethodError>(json!({}))
+        ext.method_with(Method::new("listen"), move |params, _, core| {
+            service.switch(params, core)
         });
         // 会话推来的事件（订阅了 events 流）：她的回答一句句念。
         let service = Arc::clone(self);
@@ -184,19 +183,19 @@ impl Service {
                 let Some(listener) = listener.as_mut() else {
                     return;
                 };
-                // 敲了 `miyu listen`：同听到唤醒词、后面没跟话。
-                if service.switches.wake.swap(false, Ordering::SeqCst) {
-                    woken(&barge_core, &service.speaker);
-                    awaiting = Some(Instant::now());
-                }
-                if awaiting.is_some_and(|since| since.elapsed() > AWAIT) && !listener.hearing() {
+                let switches = &service.switches;
+                if switches.ended.swap(false, Ordering::SeqCst)
+                    || awaiting.is_some_and(|since| since.elapsed() > AWAIT) && !listener.hearing()
+                {
                     awaiting = None;
                 }
-                // 窗口：唤醒以后等下一句的 8 秒，她在想、在说，念完以后的追问窗口。
+                // 窗口：`miyu listen` 开着的对话，唤醒以后等下一句的 8 秒，她在想、在说，念完以后的追问窗口。
                 let follow_up = service
                     .conversation()
                     .is_some_and(|conversation| conversation.window_open());
-                listener.set_window(awaiting.is_some() || follow_up);
+                let open = switches.held.load(Ordering::SeqCst) || awaiting.is_some() || follow_up;
+                switches.open.store(open, Ordering::SeqCst);
+                listener.set_window(open);
                 for event in listener.feed(frame) {
                     match event {
                         Event::Wake { rest, .. } => {
@@ -301,20 +300,44 @@ fn understand(core: &Core, audio: &[f32]) -> Option<String> {
 }
 
 impl Service {
-    /// `listen`（`miyu listen`、绑它的热键）：现在就叫她，同喊了唤醒词。她正念着的先停下、打断这一轮（同开口就打断）；
-    /// 半双工下她停了才开麦，开了麦下一帧就当唤醒。
-    fn wake(&self, core: &Core) {
-        if self.switches.speaking.load(Ordering::SeqCst)
-            && let Some(conversation) = self.conversation()
-        {
-            let core = core.clone();
-            std::thread::spawn(move || conversation.barge_in(&core));
+    /// `listen {to: on|off|toggle}`（`miyu listen`、绑它的热键）：开、关对话，交回现在开没开。现在开没开算上喊了唤醒词的
+    /// 那一段：在追问窗口里切一下是关。开了响叫醒那一声；关了响另一声，收掉窗口，她还在想、在说的打断这一轮。
+    fn switch(&self, params: &Value, core: &Core) -> Result<Value, MethodError> {
+        let switches = &self.switches;
+        let now = switches.held.load(Ordering::SeqCst) || switches.open.load(Ordering::SeqCst);
+        let on = match params["to"].as_str() {
+            None | Some("toggle") => !now,
+            Some("on") => true,
+            Some("off") => false,
+            Some(other) => {
+                return Err(MethodError::new(
+                    "bad_params",
+                    format!("Unknown switch {other}."),
+                ));
+            }
+        };
+        switches.held.store(on, Ordering::SeqCst);
+        if on {
+            switches.open.store(true, Ordering::SeqCst);
+            if !now {
+                woken(core, &self.speaker);
+            }
+        } else {
+            switches.ended.store(true, Ordering::SeqCst);
+            switches.open.store(false, Ordering::SeqCst);
+            if let Some(conversation) = self.conversation() {
+                let core = core.clone();
+                std::thread::spawn(move || conversation.close(&core));
+            }
+            if now {
+                chime::play(&self.speaker, Chime::Off);
+            }
         }
-        self.switches.wake.store(true, Ordering::SeqCst);
+        Ok(json!({"listening": on}))
     }
 }
 
-/// 叫醒了（唤醒词、`miyu listen`）：响一声，识别先加载模型。
+/// 叫醒了（唤醒词、`miyu listen` 开了对话）：响一声，识别先加载模型。
 fn woken(core: &Core, speaker: &Speaker) {
     let core = core.clone();
     std::thread::spawn(move || warm_up(&core));

@@ -22,8 +22,12 @@ const RETRY: Duration = Duration::from_millis(500);
 /// 什么时候该收麦。
 #[derive(Clone, Default)]
 pub struct Switches {
-    /// 有人敲了 `miyu listen`（或按了绑它的热键）：下一帧当听到了唤醒词。
-    pub wake: Arc<AtomicBool>,
+    /// 对话开着（`miyu listen` 开的，或热键）：说什么都交给她，不用唤醒词、不计时，`miyu listen` 再关。
+    pub held: Arc<AtomicBool>,
+    /// 现在在对话里（开着的、喊了唤醒词等下一句的、追问窗口里的）：收麦的线程每一帧写，开关照它算现在开没开。
+    pub open: Arc<AtomicBool>,
+    /// 关了对话：收麦的线程把唤醒以后等下一句的那一段也收掉。
+    pub ended: Arc<AtomicBool>,
     /// 她在说话（半双工：不收麦）。
     pub speaking: Arc<AtomicBool>,
     /// 全双工（戴耳机）：她说话的时候也收麦，好听得见打断（设计 20 第九节第 7 步）。

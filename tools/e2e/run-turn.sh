@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 语音助手一整轮对真核心（施工 VO-11下）：假麦克风（KWS 的 5.wav，唤醒词「周望军」）→ 语音输入认字 → voice 场所的会话 →
 # 假的对话服务流式回「好的，三点见。明天再聊！」→ 一句句交 tts.play（朗读接假的合成服务，ALSA 没设备、放不出来）。
-# BY_COMMAND=1：不喊唤醒词，假麦克风换成 SenseVoice 带的 zh.wav（前面垫 6 秒安静），助手起来以后敲 `miyu listen` 叫她（施工 VO-14）。
+# BY_COMMAND=1：不喊唤醒词，假麦克风换成 SenseVoice 带的 zh.wav（前面垫 6 秒安静），助手起来以后敲 `miyu listen` 开对话，
+# 一轮完了 `miyu listen off` 关（施工 VO-14）。
 set -u
 S=${MIYU_VOICE_E2E:?set MIYU_VOICE_E2E to a scratch folder, see tools/e2e/README.md}
 CORE=${MIYU_CORE:?set MIYU_CORE to a built core checkout}
@@ -36,6 +37,7 @@ echo "--- bus"; $M bus list 2>&1 | tail -3
 [ -z "${PLAY_TIMING:-}" ] || { s=$(date +%s%N); $M say 你好 2>&1 | tail -1; e=$(date +%s%N); echo "--- miyu say took $(( (e-s)/1000000 )) ms"; }
 [ -z "${BY_COMMAND:-}" ] || echo "--- miyu listen: $($M listen 2>&1)"
 sleep ${WAIT:-20}
+[ -z "${BY_COMMAND:-}" ] || echo "--- miyu listen off: $($M listen off 2>&1)"
 echo "--- assistant stderr"; tail -8 $MIYU_HOME/var/log/miyu-voice-assistant/stderr 2>/dev/null
 echo "--- what the model was sent (last user message)"; python3 -I -c "import json,sys; ls=[json.loads(l) for l in open(sys.argv[1])]; m=ls[-1]['messages'] if ls else []; print([x for x in m if x['role']=='user'][-1:] if m else 'nothing'); print('spoken fact present:', any('spoken' in json.dumps(x) for x in m))" $S/chat.log 2>&1
 echo "--- what tts was asked to say"; python3 -I -c "import json,sys; [print(json.loads(l)['body']['input'], '| voice', json.loads(l)['body']['voice'], '| speed', json.loads(l)['body']['speed']) for l in open(sys.argv[1])]" $S/fake.log 2>&1

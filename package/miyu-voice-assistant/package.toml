@@ -12,11 +12,11 @@ icon = "audio-lines"
 # 配置键是 voice-assistant.*（不写是包的编号，太长；程序照这个前缀读）。
 prefix = "voice-assistant"
 
-# miyu listen：现在就叫她，同喊了唤醒词（项目主人 2026-11-10 定：装着、没停用就一直听唤醒词，不是开关）。
+# miyu listen：开关和她的对话，miyu listen on、off 写明（项目主人 2026-11-10 定：装着、没停用就一直听唤醒词，开关管的是对话）。
 [command]
 name = "listen"
 program = "miyu-voice-assistant"
-about = { en = "Talk to her now, same as saying the wake word", zh = "现在就叫她，同喊唤醒词", ja = "今すぐ話しかける（ウェイクワードと同じ）" }
+about = { en = "Start or end a conversation with her", zh = "开始、结束和她的对话", ja = "会話を始める・終える" }
 
 [process]
 args = ["serve"]

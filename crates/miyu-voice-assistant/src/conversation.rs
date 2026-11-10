@@ -40,6 +40,8 @@ pub struct Window {
     in_turn: bool,
     /// 念完以后开到什么时候。
     until: Option<Instant>,
+    /// 这一轮半路关了对话（`miyu listen off`）：这一轮完了不开追问窗口。
+    closed: bool,
 }
 
 impl Window {
@@ -119,6 +121,19 @@ impl Conversation {
             generation,
             played,
         }))
+    }
+
+    /// 关了对话（`miyu listen off`）：追问窗口收掉；她还在想、在说的，打断这一轮（同开口就打断），完了也不再开窗口。
+    pub fn close(&self, core: &Core) {
+        let in_turn = {
+            let mut window = self.window.lock().unwrap_or_else(PoisonError::into_inner);
+            window.until = None;
+            window.closed = window.in_turn;
+            window.in_turn
+        };
+        if in_turn {
+            self.barge_in(core);
+        }
     }
 
     /// 窗口现在开着没有（收麦的线程照它决定要不要唤醒词）。
@@ -266,7 +281,8 @@ fn speak_in_turn(core: Core, switches: Switches, turn: Turn, queue: mpsc::Receiv
                         .clear();
                     let mut window = turn.window.lock().unwrap_or_else(PoisonError::into_inner);
                     window.in_turn = false;
-                    window.until = Some(Instant::now() + FOLLOW_UP);
+                    window.until =
+                        (!std::mem::take(&mut window.closed)).then(|| Instant::now() + FOLLOW_UP);
                 }
             }
         }

@@ -13,7 +13,7 @@ miyu pkg install miyu-voice-assistant   # 全套
 miyu pkg install miyu-voice-input       # 只要语音转字
 ```
 
-语音助手装着、没停用，核心开着就一直听唤醒词（默认「未有未有」「密友密友」「miyumiyu」「みゆみゆ」，配置页能改，`miyu listen wake-test <词>` 先试）；不想让它听就在软件包里停用它。`miyu listen` 是现在就叫她，同喊了唤醒词：响一声就说。她说完 30 秒内接着说不用再叫。她说话时默认不收麦；戴耳机的可以在配置页打开「全双工」，她说话时你一开口她就停。快捷键：Windows、macOS 由托盘程序注册；Linux 的 Wayland 不让程序自己抢全局键，在桌面环境的快捷键设置里绑一条 `miyu listen`。
+语音助手装着、没停用，核心开着就一直听唤醒词（默认「未有未有」「密友密友」「miyumiyu」「みゆみゆ」，配置页能改，`miyu listen wake-test <词>` 先试）；不想让它听就在软件包里停用它。`miyu listen` 开关和她的对话（`miyu listen on`、`off` 写明）：开了响一声，说什么都交给她、不用唤醒词，直到再关；关了响另一声，她还在说的停下。喊唤醒词叫来的，她说完 30 秒内接着说不用再叫，过了自己结束。她说话时默认不收麦；戴耳机的可以在配置页打开「全双工」，她说话时你一开口她就停。快捷键：Windows、macOS 由托盘程序注册；Linux 的 Wayland 不让程序自己抢全局键，在桌面环境的快捷键设置里绑一条 `miyu listen`。
 
 想换引擎的不用换包：社区包照 `stt.engine`、`tts.engine` 接进来（设计 `67-总线.md`），装上以后在包的配置页里多一项。
 

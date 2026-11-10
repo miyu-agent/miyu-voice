@@ -23,9 +23,11 @@ P=$(pid_of miyu-voice-assistant | head -1)
 echo "1. assistant running: pid ${P:-none}; resident: $(grep VmRSS /proc/$P/status | tr -s " \t" " ")"
 echo "   sound devices open: $(ls -l /proc/$P/fd 2>/dev/null | grep -c /dev/snd) (none here: ALSA has no devices)"
 echo "   stderr (tried the microphone right away, said it once): $(tail -3 $MIYU_HOME/var/log/miyu-voice-assistant/stderr 2>/dev/null | tr '\n' '|')"
-echo "2. miyu listen:     $($M listen 2>&1)"
-echo "3. bad argument:    $($M listen on 2>&1 | head -1)"
+echo "2. miyu listen:     $($M listen 2>&1), again: $($M listen 2>&1)"
+echo "   on: $($M listen on 2>&1), on: $($M listen on 2>&1), off: $($M listen off 2>&1), off: $($M listen off 2>&1)"
+echo "3. bad argument:    $($M listen sideways 2>&1 | head -1)"
+$M listen on >/dev/null
 python3 -I $V/tools/e2e/head.py $MIYU_HOME 'package.restart {"package": "miyu-voice-assistant"}' >/dev/null
 sleep 3; P=$(pid_of miyu-voice-assistant | head -1)
-echo "4. after restart:   pid ${P:-none}, miyu listen -> $($M listen 2>&1)"
+echo "4. after restart:   pid ${P:-none}, miyu listen -> $($M listen 2>&1) (a conversation does not outlive a restart; the wake word still works)"
 echo "   stderr: $(tail -2 $MIYU_HOME/var/log/miyu-voice-assistant/stderr 2>/dev/null | tr '\n' '|')"
