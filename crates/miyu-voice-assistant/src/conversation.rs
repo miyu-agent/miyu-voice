@@ -18,7 +18,7 @@ use miyu_ext::Core;
 use serde_json::{Value, json};
 
 use crate::capture::Switches;
-use crate::notify::{Notice, Notifier, Step};
+use crate::notify::{Identity, Notice, Notifier, Step};
 use crate::reply::Reply;
 
 /// 场所编号。
@@ -106,6 +106,10 @@ impl Conversation {
             .map_err(|error| format!("subscribe: {error}"))?;
         // 照会话的人格念（朗读的配置里每个人格一种音色，设计 20 第六节）；没有人格的用默认音色。
         let persona = subscribed["persona"].as_str().map(str::to_string);
+        // 通知署这个人格的名字、带它的头像（施工 VO-16）。
+        if let Some(persona) = &persona {
+            notifier.set_identity(Identity::of(core, persona));
+        }
         let window = Arc::new(Mutex::new(Window::default()));
         let (sentences, queue) = mpsc::channel();
         let generation = Arc::new(AtomicU64::new(0));

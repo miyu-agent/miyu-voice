@@ -91,6 +91,11 @@ step = 0.1
 default = 1.0
 name = { en = "Speed", zh = "语速", ja = "話す速さ" }
 
+# 三家引擎各一节，只在「引擎」选了它时画（核心 SG-1；项目主人 2026-11-10：选了 MiMo 还露着 MiniMax 的几项）。
+[settings.minimax]
+name = { en = "MiniMax", zh = "MiniMax", ja = "MiniMax" }
+shown_when = { engine = "minimax" }
+
 [settings.minimax.region]
 type = "option"
 choices = ["mainland", "international"]
@@ -115,6 +120,10 @@ applies = "now"
 name = { en = "MiniMax model", zh = "MiniMax 的模型", ja = "MiniMax のモデル" }
 description = { en = "speech-2.8-turbo is fast and cheap; speech-2.8-hd sounds better.", zh = "speech-2.8-turbo 快、便宜；speech-2.8-hd 音质更好。", ja = "speech-2.8-turbo は速くて安価、speech-2.8-hd は高音質。" }
 
+[settings.mimo]
+name = { en = "MiMo (Xiaomi)", zh = "MiMo（小米）", ja = "MiMo（Xiaomi）" }
+shown_when = { engine = "mimo" }
+
 [settings.mimo.key]
 type = "secret"
 layers = ["system"]
@@ -128,6 +137,10 @@ default = "mimo-v2.5-tts"
 layers = ["system"]
 applies = "now"
 name = { en = "MiMo model", zh = "MiMo 的模型", ja = "MiMo のモデル" }
+
+[settings.openai]
+name = { en = "OpenAI-compatible", zh = "OpenAI 兼容", ja = "OpenAI 互換" }
+shown_when = { engine = "openai" }
 
 [settings.openai.base_url]
 type = "url"

@@ -6,9 +6,13 @@
 //! - Windows、macOS：换不掉上一条，每变一次多弹一条；所以「在听」、回答说到一半的不弹，只弹认成了什么、回答完了、没听清、
 //!   出错、开关对话。
 //!
+//! 署名是会话的人格（名字、有头像的带头像；项目主人 2026-11-10：「通知应该显示人格名称而不是程序名称」）：Linux 写进应用名、
+//! 头像当图标，Windows、macOS 头像放进通知里的图。没有人格的署 Miyu。
+//!
 //! 测试用：设了 `MIYU_VOICE_TEST_NOTICES`（一个文件）的不弹，一条一行 JSON 记进那个文件（端到端测试不往主人桌面上弹）。
 
 use std::io::Write as _;
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::{Mutex, PoisonError};
 
@@ -56,9 +60,75 @@ impl Notice {
     }
 }
 
-/// 标题和正文，照人的语言（`zh`、`ja`，别的用英语）。
+/// 谁在说：会话人格的名字、头像（存成文件的路径，没有的不带）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Identity {
+    pub name: String,
+    pub avatar: Option<PathBuf>,
+}
+
+impl Identity {
+    /// 读这个人格的名字、头像（`persona.get`、`persona.avatar`）；头像写进包的运行目录（`MIYU_RUNTIME_DIR`，文件名带版本，
+    /// 换了头像换文件），通知服务照路径读。读不到名字的署 Miyu，没有头像、写不成的不带。
+    #[must_use]
+    pub fn of(core: &miyu_ext::Core, persona: &str) -> Identity {
+        let name = core
+            .call("persona.get", json!({"persona": persona}))
+            .ok()
+            .and_then(|answer| answer["name"].as_str().map(str::to_string))
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| "Miyu".to_string());
+        let avatar = core
+            .call("persona.avatar", json!({"persona": persona}))
+            .ok()
+            .and_then(|answer| {
+                save_avatar(
+                    &answer,
+                    &PathBuf::from(std::env::var_os("MIYU_RUNTIME_DIR")?),
+                )
+            });
+        Identity { name, avatar }
+    }
+}
+
+/// `persona.avatar` 的回应存成 `dir` 里的文件：`{avatar（版本）, media_type, data（base64）}`，没有头像的都是 `null`。
+fn save_avatar(answer: &serde_json::Value, dir: &std::path::Path) -> Option<PathBuf> {
+    use base64::Engine as _;
+    let version = answer["avatar"].as_str()?;
+    let extension = match answer["media_type"].as_str()? {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/webp" => "webp",
+        _ => return None,
+    };
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(answer["data"].as_str()?)
+        .ok()?;
+    let stamp: String = version
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .take(16)
+        .collect();
+    let path = dir.join(format!("avatar-{stamp}.{extension}"));
+    if !path.exists() {
+        std::fs::create_dir_all(dir).ok()?;
+        std::fs::write(&path, bytes).ok()?;
+    }
+    Some(path)
+}
+
+impl Default for Identity {
+    fn default() -> Identity {
+        Identity {
+            name: "Miyu".to_string(),
+            avatar: None,
+        }
+    }
+}
+
+/// 标题和正文，照人的语言（`zh`、`ja`，别的用英语）；`name` 是她的名字（人格的）。
 #[must_use]
-pub fn text(notice: &Notice, language: &str) -> (String, String) {
+pub fn text(notice: &Notice, language: &str, name: &str) -> (String, String) {
     let pick = |zh: &str, ja: &str, en: &str| -> String {
         match language {
             "zh" => zh,
@@ -98,9 +168,13 @@ pub fn text(notice: &Notice, language: &str) -> (String, String) {
         ),
         Notice::Reply { text, done } => (
             if *done {
-                "Miyu".to_string()
+                name.to_string()
             } else {
-                pick("Miyu 在说…", "Miyu が話しています…", "Miyu is speaking…")
+                match language {
+                    "zh" => format!("{name} 在说…"),
+                    "ja" => format!("{name} が話しています…"),
+                    _ => format!("{name} is speaking…"),
+                }
             },
             tail(text, REPLY_CHARS),
         ),
@@ -112,7 +186,11 @@ pub fn text(notice: &Notice, language: &str) -> (String, String) {
                     "Can't open the microphone",
                 ),
                 Step::Recognition => pick("认不了字", "文字にできません", "Can't recognize speech"),
-                Step::Sending => pick("交不给她", "Miyu に届きません", "Can't reach Miyu"),
+                Step::Sending => match language {
+                    "zh" => format!("交不给{name}"),
+                    "ja" => format!("{name} に届きません"),
+                    _ => format!("Can't reach {name}"),
+                },
                 Step::Speech => pick("念不出来", "読み上げできません", "Can't speak"),
             };
             let body = if *step == Step::Speech {
@@ -144,27 +222,31 @@ fn tail(text: &str, chars: usize) -> String {
 
 /// 弹通知的：交给它的照先后弹。
 pub struct Notifier {
-    queue: Mutex<mpsc::Sender<(Notice, String)>>,
+    queue: Mutex<mpsc::Sender<(Notice, String, Identity)>>,
     /// 人的语言（核心握手、配置变了时给的）。
     language: Mutex<String>,
+    /// 署谁的名（会话的人格）。
+    identity: Mutex<Identity>,
 }
 
 impl Notifier {
     /// 起弹通知的线程。
     #[must_use]
     pub fn start() -> Notifier {
-        let (queue, notices) = mpsc::channel::<(Notice, String)>();
+        let (queue, notices) = mpsc::channel::<(Notice, String, Identity)>();
         let record = std::env::var_os("MIYU_VOICE_TEST_NOTICES").map(std::path::PathBuf::from);
         std::thread::spawn(move || {
             let mut shown = platform::Shown::default();
-            for (notice, language) in notices {
+            for (notice, language, identity) in notices {
                 if record.is_none() && !platform::REPLACES && notice.passing() {
                     continue;
                 }
-                let (title, body) = text(&notice, &language);
+                let (title, body) = text(&notice, &language, &identity.name);
                 match &record {
                     Some(path) => {
-                        let line = json!({"title": title, "body": body}).to_string();
+                        let line = json!({"app": identity.name, "title": title, "body": body,
+                                          "avatar": identity.avatar.is_some()})
+                        .to_string();
                         if let Ok(mut file) = std::fs::OpenOptions::new()
                             .create(true)
                             .append(true)
@@ -173,14 +255,20 @@ impl Notifier {
                             let _ = writeln!(file, "{line}");
                         }
                     }
-                    None => shown.show(&title, &body),
+                    None => shown.show(&identity, &title, &body),
                 }
             }
         });
         Notifier {
             queue: Mutex::new(queue),
             language: Mutex::new("en".to_string()),
+            identity: Mutex::new(Identity::default()),
         }
+    }
+
+    /// 换署名（会话的人格）。
+    pub fn set_identity(&self, identity: Identity) {
+        *self.identity.lock().unwrap_or_else(PoisonError::into_inner) = identity;
     }
 
     /// 换人的语言（`zh`、`en`、`ja`）。
@@ -195,11 +283,16 @@ impl Notifier {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
+        let identity = self
+            .identity
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
         let _ = self
             .queue
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .send((notice, language));
+            .send((notice, language, identity));
     }
 }
 
@@ -207,6 +300,8 @@ impl Notifier {
 #[cfg(all(unix, not(target_os = "macos")))]
 mod platform {
     use notify_rust::{Hint, Notification};
+
+    use super::Identity;
 
     /// 能换掉上一条。
     pub const REPLACES: bool = true;
@@ -219,14 +314,17 @@ mod platform {
     }
 
     impl Shown {
-        pub fn show(&mut self, title: &str, body: &str) {
+        pub fn show(&mut self, identity: &Identity, title: &str, body: &str) {
             let mut notification = Notification::new();
             notification
-                .appname("Miyu")
+                .appname(&identity.name)
                 .summary(title)
                 .body(body)
-                .icon("audio-input-microphone")
                 .hint(Hint::Category("im".to_string()));
+            // 有头像的头像当图标，没有的不放图标。
+            if let Some(avatar) = identity.avatar.as_ref().and_then(|path| path.to_str()) {
+                notification.icon(avatar);
+            }
             if let Some(id) = self.last {
                 notification.id(id);
             }
@@ -251,6 +349,8 @@ mod platform {
 mod platform {
     use notify_rust::Notification;
 
+    use super::Identity;
+
     /// 能换掉上一条。
     pub const REPLACES: bool = false;
 
@@ -261,13 +361,17 @@ mod platform {
     }
 
     impl Shown {
-        pub fn show(&mut self, title: &str, body: &str) {
-            match Notification::new()
-                .appname("Miyu")
+        pub fn show(&mut self, identity: &Identity, title: &str, body: &str) {
+            let mut notification = Notification::new();
+            notification
+                .appname(&identity.name)
                 .summary(title)
-                .body(body)
-                .show()
-            {
+                .body(body);
+            // 有头像的放进通知里的图，没有的不放。
+            if let Some(avatar) = identity.avatar.as_ref().and_then(|path| path.to_str()) {
+                notification.image_path(avatar);
+            }
+            match notification.show() {
                 Ok(_) => self.failed = false,
                 Err(error) => {
                     if !self.failed {
