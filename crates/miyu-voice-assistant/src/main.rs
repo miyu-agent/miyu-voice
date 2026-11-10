@@ -7,6 +7,7 @@
 mod capture;
 mod chime;
 mod conversation;
+mod echo;
 mod keywords;
 mod listen;
 mod models;

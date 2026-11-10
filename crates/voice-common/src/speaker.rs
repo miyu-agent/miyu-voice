@@ -7,7 +7,9 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player};
+use rodio::{
+    ChannelCount, Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, SampleRate, Source,
+};
 
 /// 放不了的原因。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +22,10 @@ pub enum PlayError {
 
 /// 队列空了以后音箱再开多久：下一句在这之内来的接着放，不重开。
 pub const LINGER: Duration = Duration::from_millis(1500);
+
+/// 旁听正在放的声音（施工 VO-20，回声消除要知道音箱在放什么）：声音交给声卡的时候一小块一小块叫它，给的是合成一个声道的
+/// 采样和采样率。在放声音的线程上叫，里面只该记下来、马上回。
+pub type Tap = Arc<dyn Fn(&[f32], u32) + Send + Sync>;
 
 /// 本机的音箱。复制出去的是同一个（同一个队列）。
 #[derive(Default, Clone)]
@@ -39,6 +45,8 @@ struct Inner {
     open: Mutex<Option<Open>>,
     /// 放过几段：等着关音箱的看到变了（又放了新的）就不关。
     uses: AtomicU64,
+    /// 旁听的。
+    tap: Option<Tap>,
 }
 
 struct Open {
@@ -47,6 +55,17 @@ struct Open {
 }
 
 impl Speaker {
+    /// 带旁听的音箱：放的每一段都照先后交给 `tap`。
+    #[must_use]
+    pub fn tapped(tap: Tap) -> Speaker {
+        Speaker {
+            inner: Arc::new(Inner {
+                tap: Some(tap),
+                ..Inner::default()
+            }),
+        }
+    }
+
     /// 放一段，放完交回 `true`，被 [`Speaker::stop`] 停了交回 `false`。
     ///
     /// # Errors
@@ -116,7 +135,10 @@ impl Inner {
                 return Ok(false);
             };
             let player = Arc::new(Player::connect_new(open.sink.mixer()));
-            player.append(decoder);
+            match &self.tap {
+                Some(tap) => player.append(Tapped::new(decoder, Arc::clone(tap))),
+                None => player.append(decoder),
+            }
             open.playing = Some(Arc::clone(&player));
             player
         };
@@ -130,3 +152,77 @@ impl Inner {
         Ok(true)
     }
 }
+
+/// 一段声音外面套一层：声卡每取走约 10 毫秒，把这一小块（几个声道平均成一个）交给旁听的。
+struct Tapped<S> {
+    inner: S,
+    tap: Tap,
+    /// 攒着还没交的（单声道）。
+    block: Vec<f32>,
+    /// 这一帧（每个声道一个采样）加到哪了。
+    sum: f32,
+    seen: u16,
+}
+
+impl<S: Source> Tapped<S> {
+    fn new(inner: S, tap: Tap) -> Tapped<S> {
+        Tapped {
+            inner,
+            tap,
+            block: Vec::new(),
+            sum: 0.0,
+            seen: 0,
+        }
+    }
+
+    fn flush(&mut self) {
+        if !self.block.is_empty() {
+            (self.tap)(&self.block, self.inner.sample_rate().get());
+            self.block.clear();
+        }
+    }
+}
+
+impl<S: Source> Iterator for Tapped<S> {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<f32> {
+        let Some(sample) = self.inner.next() else {
+            self.flush();
+            return None;
+        };
+        let channels = self.inner.channels().get();
+        self.sum += sample;
+        self.seen += 1;
+        if self.seen >= channels {
+            self.block.push(self.sum / f32::from(channels));
+            self.sum = 0.0;
+            self.seen = 0;
+            if self.block.len() >= (self.inner.sample_rate().get() / 100) as usize {
+                self.flush();
+            }
+        }
+        Some(sample)
+    }
+}
+
+impl<S: Source> Source for Tapped<S> {
+    fn current_span_len(&self) -> Option<usize> {
+        self.inner.current_span_len()
+    }
+
+    fn channels(&self) -> ChannelCount {
+        self.inner.channels()
+    }
+
+    fn sample_rate(&self) -> SampleRate {
+        self.inner.sample_rate()
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
+    }
+}
+
+#[cfg(test)]
+mod tests;

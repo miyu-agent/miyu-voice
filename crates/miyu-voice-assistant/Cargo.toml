@@ -14,6 +14,8 @@ path = "src/main.rs"
 [dependencies]
 # 人声检测（Silero VAD）、唤醒词（KWS）：sherpa-onnx，同语音输入那一版，库照 tools/sherpa-lib.sh 校验过的。
 sherpa-onnx = "=2.0.1"
+# 回声消除（施工 VO-20）：WebRTC AEC3 的纯 Rust 移植，三个系统都不带 C 库。
+sonora = "=0.3.0"
 # 唤醒词里的汉字注带调拼音（keywords.rs，同旧版）。
 pinyin = "0.11.0"
 # 系统通知（notify.rs，施工 VO-16）：Linux 是会话 D-Bus 上的 freedesktop 通知（zbus，纯 Rust），macOS、Windows 是系统的；

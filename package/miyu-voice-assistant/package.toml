@@ -64,8 +64,8 @@ description = { en = "The device name. Empty: the system default.", zh = "设备
 
 [settings.full_duplex]
 type = "bool"
-default = false
+default = true
 layers = ["system"]
 applies = "now"
-name = { en = "Full duplex (with headphones)", zh = "全双工（戴耳机时）", ja = "全二重（ヘッドホン使用時）" }
-description = { en = "Keep listening while she speaks, so you can cut in. Only with headphones: through speakers she would hear herself.", zh = "她说话时也听着，你一开口她就停。只在戴耳机时打开：外放的话她会听到自己的声音。", ja = "話している間も聞き続け、話しかけると止まります。ヘッドホンのときだけ：スピーカーだと自分の声を拾います。" }
+name = { en = "Interrupt her by speaking", zh = "说话时可以打断她", ja = "話しかけて止める" }
+description = { en = "Start talking while she speaks and she stops. Off: she listens only after she has finished.", zh = "她说话时你一开口她就停。关掉以后，她说完才听你的。", ja = "話している途中で話しかけると止まります。オフ：話し終わってから聞きます。" }

@@ -6,7 +6,7 @@
 //! 总线上的 `tts.synthesize`，放这一句时下一句已经在合，合好的交 `tts.play`；念的时候半双工不收麦（第 7 步）。一轮完了、念完了，开 30 秒追问窗口（第 5 步）：窗口开着说话不用再叫她；
 //! 她想、说的时候窗口一直开着，不计时。总线上没有 `tts`（没装、没配朗读）的只听不说，回答照样在各个头里看得到。
 //!
-//! 开口就打断（第 6 步，施工 VO-12）：戴耳机开了全双工的，她念的时候你一开口，排着没念的丢掉、`tts.stop` 停掉正在念的、
+//! 开口就打断（第 6 步，施工 VO-12）：她念的时候你一开口（「说话时可以打断她」开着，默认），排着没念的丢掉、停掉正在念的、
 //! 打断这一轮，会话里补一块事实写明你听到哪一句为止、后面的没念出来（她下一轮知道你没听到后半截）。
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 
 use miyu_ext::Core;
 use serde_json::{Value, json};
+use voice_common::blobs;
+use voice_common::speaker::{PlayError, Speaker};
 
 use crate::capture::Switches;
 use crate::notify::{Identity, Notice, Notifier, Step};
@@ -66,6 +68,8 @@ pub struct Conversation {
     /// 这一轮她说了的（一句句交出去念的连起来）：通知里跟着写。
     said: Mutex<String>,
     notifier: Arc<Notifier>,
+    /// 助手自己的音箱：她念的每一句从这放（回声消除要旁听，施工 VO-20）。
+    speaker: Speaker,
 }
 
 /// 交给念的那个线程的。
@@ -86,6 +90,7 @@ impl Conversation {
         core: &Core,
         switches: &Switches,
         notifier: &Arc<Notifier>,
+        speaker: &Speaker,
     ) -> Result<Arc<Conversation>, String> {
         let opened = core
             .call(
@@ -122,6 +127,7 @@ impl Conversation {
                 generation: Arc::clone(&generation),
                 played: Arc::clone(&played),
                 persona,
+                speaker: speaker.clone(),
             },
             queue,
             Arc::clone(notifier),
@@ -135,6 +141,7 @@ impl Conversation {
             played,
             said: Mutex::new(String::new()),
             notifier: Arc::clone(notifier),
+            speaker: speaker.clone(),
         }))
     }
 
@@ -192,6 +199,8 @@ impl Conversation {
     /// 哪一句为止。没在念的什么都不做（她还在想时说话，照回合中途来的消息排）。
     pub fn barge_in(&self, core: &Core) {
         self.generation.fetch_add(1, Ordering::SeqCst);
+        self.speaker.stop();
+        // 她用朗读工具（`say`）自己放的那种也停。
         let _ = core.call("bus.call", json!({"name": "tts", "method": "stop"}));
         // 一轮已经完了的回 not_running：照样补事实。
         let _ = core.call(
@@ -269,6 +278,7 @@ struct Turn {
     played: Arc<Mutex<Vec<String>>>,
     /// 会话的人格：念的时候交给 `tts`，照它挑音色。
     persona: Option<String>,
+    speaker: Speaker,
 }
 
 /// 合好、排着放的。
@@ -279,10 +289,10 @@ enum Ready {
     TurnEnded,
 }
 
-/// 念的那两个线程（施工 VO-15）：合成的一个照先后交总线上的 `tts.synthesize`，合好的排给放的一个交 `tts.play`；放这一句
+/// 念的那两个线程（施工 VO-15）：合成的一个照先后交总线上的 `tts.synthesize`，合好的排给放的一个从助手自己的音箱放；放这一句
 /// 的时候下一句已经在合，句子之间不再等合成（原来一句放完才去合下一句，云端合成一两秒，句与句之间断一下）。
 ///
-/// 还有没念完的句子（在合的、排着的、在放的）就算她在说话：半双工不收麦，全双工照收，好听得见打断；一轮完了、念完了开
+/// 还有没念完的句子（在合的、排着的、在放的）就算她在说话：麦照收、过回声消除，好听得见打断（关了「说话时可以打断她」的不收）；一轮完了、念完了开
 /// 追问窗口。合不了、放不了（没装、没配朗读，没有音箱）的这一轮只听不说，说一次就不再试，下一轮重新试。
 fn speak_in_turn(
     core: Core,
@@ -387,7 +397,7 @@ fn synthesize_ahead(
     }
 }
 
-/// 放的线程：照先后交 `tts.play`；放完的记下（打断时写明听到哪一句）；一轮完了开追问窗口。
+/// 放的线程：照先后从助手自己的音箱放（施工 VO-20：原来交 `tts.play`，回声消除旁听不到别的进程放的）；放完的记下（打断时写明听到哪一句）；一轮完了开追问窗口。
 fn play_in_order(core: &Core, speaking: &Speaking, turn: &Turn, to_play: mpsc::Receiver<Ready>) {
     for next in to_play {
         match next {
@@ -398,18 +408,14 @@ fn play_in_order(core: &Core, speaking: &Speaking, turn: &Turn, to_play: mpsc::R
                     if std::env::var_os("MIYU_VOICE_MEASURE").is_some() {
                         eprintln!("miyu-voice-assistant: measure: speaking \"{sentence}\"");
                     }
-                    let played = core.call(
-                        "bus.call",
-                        json!({"name": "tts", "method": "play", "params": {"audio": audio}}),
-                    );
-                    match played {
-                        Ok(answer) if answer["finished"] == true => turn
+                    match play(core, &turn.speaker, &audio) {
+                        Ok(true) => turn
                             .played
                             .lock()
                             .unwrap_or_else(PoisonError::into_inner)
                             .push(sentence),
-                        Ok(_) => {}
-                        Err(error) => speaking.fail(error.to_string()),
+                        Ok(false) => {}
+                        Err(why) => speaking.fail(why),
                     }
                 }
                 speaking.end();
@@ -426,6 +432,14 @@ fn play_in_order(core: &Core, speaking: &Speaking, turn: &Turn, to_play: mpsc::R
             }
         }
     }
+}
+
+/// 放合好的一句（`audio` 是 blob 编号）：从助手自己的音箱放，放完交回 `true`，被打断停了的交回 `false`。
+fn play(core: &Core, speaker: &Speaker, audio: &str) -> Result<bool, String> {
+    let bytes = blobs::get(core, audio)?;
+    speaker.play(bytes).map_err(|error| match error {
+        PlayError::BadAudio(why) | PlayError::NoSpeaker(why) => why,
+    })
 }
 
 #[cfg(test)]

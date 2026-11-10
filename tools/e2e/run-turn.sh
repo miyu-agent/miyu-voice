@@ -31,7 +31,7 @@ c providers.fake.base_url http://127.0.0.1:18932/v1; c providers.fake.driver ope
 for id in miyu-voice-input miyu-say miyu-voice-assistant; do $M pkg install --yes $S/e2e-pkg/$id 2>&1 | tail -1; done
 c say.engine openai; c say.openai.base_url http://127.0.0.1:18931/v1; c say.openai.model fake-tts
 c voice-assistant.wake_words '["周望军"]'
-[ -z "${FULL_DUPLEX:-}" ] || c voice-assistant.full_duplex true
+[ -z "${HALF_DUPLEX:-}" ] || c voice-assistant.full_duplex false
 [ -z "${PERSONA_VOICE:-}" ] || c say.personas '[{"persona": "software-engineer", "voice": "'"$PERSONA_VOICE"'", "speed": 1.2}]'
 $M package restart miyu-voice-assistant >/dev/null 2>&1 || python3 -I $V/tools/e2e/head.py $MIYU_HOME 'package.restart {"package": "miyu-voice-assistant"}' >/dev/null
 sleep 3

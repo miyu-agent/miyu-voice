@@ -1,6 +1,7 @@
 //! 助手一直收着麦（设计 20 第九节）：助手在跑（包装着、没停用）、不是她在说话（第 7 步半双工）的时候，拿整机的麦克风锁、
 //! 开麦，转成 16 kHz、一帧帧交给听的那一套。有听写要麦（终端、命令行点了麦克风，[`MicLock::wanted`]）就关麦放锁，等它录完
-//! 再拿（第九节「一个麦克风两个人用」）。她在说话的时候麦是关着的：不收她自己的声音。
+//! 再拿（第九节「一个麦克风两个人用」）。她在说话的时候：开着「说话时可以打断她」的（默认）麦照样收，收到的先过回声消除
+//! （[`crate::echo`]，施工 VO-20），不把她自己的声音当成你说的；关了的麦是关着的。
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,6 +11,7 @@ use sherpa_onnx::LinearResampler;
 use voice_common::mic::Mic;
 use voice_common::mic_lock::MicLock;
 
+use crate::echo::{Echo, Played};
 use crate::listen::RATE;
 use crate::notify::{Notice, Notifier, Step};
 
@@ -31,10 +33,15 @@ pub struct Switches {
     pub ended: Arc<AtomicBool>,
     /// 对话是 `miyu listen off` 关的（已经响过、说过）：收麦的线程看到对话完了不再响、不再说。
     pub silenced: Arc<AtomicBool>,
-    /// 她在说话（半双工：不收麦）。
+    /// 她在说话。
     pub speaking: Arc<AtomicBool>,
-    /// 全双工（戴耳机）：她说话的时候也收麦，好听得见打断（设计 20 第九节第 7 步）。
+    /// 说话时可以打断她（默认开）：她说话的时候也收麦、过回声消除，好听得见打断（设计 20 第九节第 7 步）；关了的她说话时
+    /// 不收麦。
     pub full_duplex: Arc<AtomicBool>,
+    /// 麦克风里现在主要是她自己的声音（回声消除写）：这时听到的开口不算打断。
+    pub mostly_echo: Arc<AtomicBool>,
+    /// 音箱放过的声音：助手的音箱旁听了记在这，回声消除从这取。
+    pub played: Played,
     /// 整个程序要退了。
     pub quit: Arc<AtomicBool>,
 }
@@ -50,15 +57,24 @@ impl Switches {
 /// 测试用：设了 `MIYU_VOICE_TEST_MIC`（一个 16 kHz 单声道的 wav）的不开麦，照实时的快慢把这个文件「听」一遍，前面垫
 /// `MIYU_VOICE_TEST_MIC_LEAD` 秒（不设是两秒）、后面垫两秒安静，再往后一直是安静（端到端测试不碰主人的麦克风，施工 VO-11下、
 /// VO-14）。另设了 `MIYU_VOICE_TEST_MIC_CUT_IN`（同样的 wav）的，
-/// 她第一次开口念的时候把它「听」一遍，测开口就打断（施工 VO-12，要开全双工才收得到）。
+/// 她第一次开口念的时候把它「听」一遍，测开口就打断（施工 VO-12；关了「说话时可以打断她」的收不到）。
 pub fn run(
     device: Option<&str>,
     switches: &Switches,
     notifier: &Notifier,
     mut frame: impl FnMut(&[f32]),
 ) {
+    let mut frames = Frames {
+        echo: Echo::new(switches.played.clone(), Arc::clone(&switches.mostly_echo)),
+        pending: Vec::new(),
+    };
     if let Some(path) = std::env::var_os("MIYU_VOICE_TEST_MIC") {
-        play_file(&std::path::PathBuf::from(path), switches, &mut frame);
+        play_file(
+            &std::path::PathBuf::from(path),
+            switches,
+            &mut frames,
+            &mut frame,
+        );
         return;
     }
     let mut warned = None::<String>;
@@ -86,19 +102,41 @@ pub fn run(
             }
         };
         warned = None;
-        listen_while_held(&mic, switches, &mut frame);
+        listen_while_held(&mic, switches, &mut frames, &mut frame);
         drop(mic);
         drop(lock);
     }
 }
 
-/// 拿着麦的这一段：收、转、切帧，直到有人要麦、关了、她开口、设备出错。
-fn listen_while_held(mic: &Mic, switches: &Switches, frame: &mut impl FnMut(&[f32])) {
+/// 收到的 16 kHz 的声音过回声消除、切成一帧帧。
+struct Frames {
+    echo: Echo,
+    pending: Vec<f32>,
+}
+
+impl Frames {
+    fn feed(&mut self, heard: &[f32], frame: &mut impl FnMut(&[f32])) {
+        self.pending.extend(self.echo.clean(heard));
+        let whole = self.pending.len() / FRAME * FRAME;
+        for piece in self.pending[..whole].chunks(FRAME) {
+            frame(piece);
+        }
+        self.pending.drain(..whole);
+    }
+}
+
+/// 拿着麦的这一段：收、转、消回声、切帧，直到有人要麦、关了、她开口（关了「说话时可以打断她」的）、设备出错。
+fn listen_while_held(
+    mic: &Mic,
+    switches: &Switches,
+    frames: &mut Frames,
+    frame: &mut impl FnMut(&[f32]),
+) {
     let rate = i32::try_from(mic.rate).unwrap_or(48_000);
     let resampler = (mic.rate as usize != RATE)
         .then(|| LinearResampler::create(rate, 16_000))
         .flatten();
-    let mut pending: Vec<f32> = Vec::new();
+    frames.pending.clear();
     let mut checked = Instant::now();
     loop {
         if checked.elapsed() >= CHECK {
@@ -115,19 +153,19 @@ fn listen_while_held(mic: &Mic, switches: &Switches, frame: &mut impl FnMut(&[f3
             continue;
         };
         match &resampler {
-            Some(resampler) => pending.extend(resampler.resample(&chunk, false)),
-            None => pending.extend(chunk),
+            Some(resampler) => frames.feed(&resampler.resample(&chunk, false), frame),
+            None => frames.feed(&chunk, frame),
         }
-        let whole = pending.len() / FRAME * FRAME;
-        for piece in pending[..whole].chunks(FRAME) {
-            frame(piece);
-        }
-        pending.drain(..whole);
     }
 }
 
-/// 测试用的「麦克风」：她在说话时不喂（半双工），照实时的快慢。
-fn play_file(path: &std::path::Path, switches: &Switches, frame: &mut impl FnMut(&[f32])) {
+/// 测试用的「麦克风」：照实时的快慢；关了「说话时可以打断她」的，她在说话时不喂。
+fn play_file(
+    path: &std::path::Path,
+    switches: &Switches,
+    frames: &mut Frames,
+    frame: &mut impl FnMut(&[f32]),
+) {
     let read = |path: &std::path::Path| {
         std::fs::read(path)
             .ok()
@@ -158,7 +196,7 @@ fn play_file(path: &std::path::Path, switches: &Switches, frame: &mut impl FnMut
             audio.extend(std::mem::take(&mut cut_in));
         }
         let piece = audio.get(at..at + FRAME).unwrap_or(&silence);
-        frame(piece);
+        frames.feed(piece, frame);
         at += FRAME;
         std::thread::sleep(Duration::from_millis(32));
     }

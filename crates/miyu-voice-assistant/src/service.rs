@@ -41,7 +41,7 @@ pub struct Settings {
     pub threshold: f32,
     /// 麦克风的设备名；空的用默认。
     pub microphone: String,
-    /// 全双工（戴耳机时开）：她说话时也收麦，开口就打断她。
+    /// 说话时可以打断她（默认开）：她说话时也收麦（过回声消除），你一开口她就停。
     pub full_duplex: bool,
 }
 
@@ -74,7 +74,7 @@ impl Settings {
             full_duplex: config
                 .get("voice-assistant.full_duplex")
                 .and_then(Value::as_bool)
-                .unwrap_or(false),
+                .unwrap_or(true),
             microphone: config
                 .get("voice-assistant.microphone")
                 .and_then(Value::as_str)
@@ -100,10 +100,13 @@ impl Service {
     /// `cache` 是这个包的缓存目录。
     #[must_use]
     pub fn new(cache: PathBuf) -> Arc<Service> {
+        let switches = Switches::default();
+        switches.full_duplex.store(true, Ordering::SeqCst);
         Arc::new(Service {
             cache,
-            switches: Switches::default(),
-            speaker: Speaker::default(),
+            // 助手放的声音（提示音、她念的话）都让回声消除旁听（施工 VO-20）。
+            speaker: Speaker::tapped(switches.played.tap()),
+            switches,
             notifier: Arc::new(Notifier::start()),
             settings: Mutex::new(Settings::from_config(&Map::new())),
             conversation: Mutex::new(None),
@@ -161,7 +164,7 @@ impl Service {
         // 听的那一套（两个模型，约 40 MB）第一次真的开麦收到声音时才建：装上没开的助手只占几 MB。
         let mut listener: Option<Listener> = None;
         let mut unbuildable = false;
-        match Conversation::open(core, &self.switches, &self.notifier) {
+        match Conversation::open(core, &self.switches, &self.notifier, &self.speaker) {
             Ok(conversation) => {
                 *self
                     .conversation
@@ -235,9 +238,11 @@ impl Service {
                                 awaiting = Some((Instant::now(), AWAIT));
                                 let _ = utterances.send(audio);
                             }
-                            // 她正念着、你开口了（只有全双工收得到）：打断。打断要等核心回，另开线程，不耽误收麦。
+                            // 她正念着、你开口了：打断。麦克风里主要是她自己的声音时（回声没消干净）不算。打断要等核心回，
+                            // 另开线程，不耽误收麦。
                             Event::Onset => {
                                 if service.switches.speaking.load(Ordering::SeqCst)
+                                    && !service.switches.mostly_echo.load(Ordering::SeqCst)
                                     && let Some(conversation) = service.conversation()
                                 {
                                     let core = barge_core.clone();

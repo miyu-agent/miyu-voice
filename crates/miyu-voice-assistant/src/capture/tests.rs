@@ -2,7 +2,7 @@ use std::sync::atomic::Ordering;
 
 use super::Switches;
 
-/// 一直收麦（施工 VO-14：开关管的是对话，不管听不听唤醒词）；半双工她说话时不收，全双工照收；开着对话不改收不收。
+/// 一直收麦（施工 VO-14：开关管的是对话，不管听不听唤醒词）；关了「说话时可以打断她」的她说话时不收，开着的照收；开着对话不改收不收。
 #[test]
 fn the_microphone_is_wanted_unless_she_speaks_without_headphones() {
     let switches = Switches::default();
