@@ -41,7 +41,6 @@ element = "text"
 layers = ["system"]
 applies = "program_start"
 name = { en = "Wake words", zh = "唤醒词", ja = "ウェイクワード" }
-description = { en = "Chinese characters, kana or Latin letters, e.g. 密友密友, みゆみゆ, miyumiyu. Empty: Miyu's names. Try one with: miyu listen wake-test <word>.", zh = "汉字、假名、拉丁字母都行，例如 密友密友、みゆみゆ、miyumiyu。不填用 Miyu 的名字。先试试：miyu listen wake-test <词>。", ja = "漢字・かな・ローマ字。例：密友密友、みゆみゆ、miyumiyu。空欄は Miyu の名前。試すには：miyu listen wake-test <語>。" }
 
 [settings.sensitivity]
 type = "number"
