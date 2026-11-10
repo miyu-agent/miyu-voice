@@ -10,6 +10,13 @@ use cpal::{FromSample, SampleFormat, SizedSample};
 
 /// 系统是照哪一套列设备的。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "一种系统只用得到其中的：Linux 是前两种，别的是第三种；测试三种都用"
+    )
+)]
 enum Listing {
     /// 声音服务（PipeWire 的 PulseAudio 接口、PulseAudio）：列的是它的一个个来源，同系统声音设置里的。
     Server,
@@ -29,11 +36,14 @@ struct Found {
 }
 
 fn found(host: &cpal::Host) -> (Listing, Vec<Found>) {
-    let listing = match format!("{:?}", host.id()).as_str() {
-        "PulseAudio" | "PipeWire" => Listing::Server,
-        "Alsa" => Listing::Alsa,
-        _ => Listing::Plain,
+    // 照枚举比，不照名字的字符串（core1 审 VO-22）：cpal 多了一种的话这里编不过，不会悄悄当成别的系统。
+    #[cfg(target_os = "linux")]
+    let listing = match host.id() {
+        cpal::HostId::PulseAudio => Listing::Server,
+        cpal::HostId::Alsa => Listing::Alsa,
     };
+    #[cfg(not(target_os = "linux"))]
+    let listing = Listing::Plain;
     let devices = host.input_devices().map_or_else(
         |_| Vec::new(),
         |devices| {
