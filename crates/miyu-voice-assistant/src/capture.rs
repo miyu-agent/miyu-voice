@@ -1,6 +1,6 @@
-//! 助手一直收着麦（设计 20 第九节）：开着（`miyu listen on`）、不是她在说话（第 7 步半双工）的时候，拿整机的麦克风锁、开麦，
-//! 转成 16 kHz、一帧帧交给听的那一套。有听写要麦（终端、命令行点了麦克风，[`MicLock::wanted`]）就关麦放锁，等它录完再拿
-//! （第九节「一个麦克风两个人用」）。关了、她在说话的时候麦是关着的：系统的麦克风指示灯不亮，也不收她自己的声音。
+//! 助手一直收着麦（设计 20 第九节）：助手在跑（包装着、没停用）、不是她在说话（第 7 步半双工）的时候，拿整机的麦克风锁、
+//! 开麦，转成 16 kHz、一帧帧交给听的那一套。有听写要麦（终端、命令行点了麦克风，[`MicLock::wanted`]）就关麦放锁，等它录完
+//! 再拿（第九节「一个麦克风两个人用」）。她在说话的时候麦是关着的：不收她自己的声音。
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,8 +22,8 @@ const RETRY: Duration = Duration::from_millis(500);
 /// 什么时候该收麦。
 #[derive(Clone, Default)]
 pub struct Switches {
-    /// 开着（`miyu listen`）。
-    pub listening: Arc<AtomicBool>,
+    /// 有人敲了 `miyu listen`（或按了绑它的热键）：下一帧当听到了唤醒词。
+    pub wake: Arc<AtomicBool>,
     /// 她在说话（半双工：不收麦）。
     pub speaking: Arc<AtomicBool>,
     /// 全双工（戴耳机）：她说话的时候也收麦，好听得见打断（设计 20 第九节第 7 步）。
@@ -34,15 +34,15 @@ pub struct Switches {
 
 impl Switches {
     fn wanted(&self) -> bool {
-        self.listening.load(Ordering::SeqCst)
-            && (self.full_duplex.load(Ordering::SeqCst) || !self.speaking.load(Ordering::SeqCst))
+        self.full_duplex.load(Ordering::SeqCst) || !self.speaking.load(Ordering::SeqCst)
     }
 }
 
 /// 一直跑到 `quit`：该收的时候收，一帧帧交给 `frame`。`device` 是麦克风的设备名。
 ///
-/// 测试用：设了 `MIYU_VOICE_TEST_MIC`（一个 16 kHz 单声道的 wav）的不开麦，开着的时候照实时的快慢把这个文件「听」一遍，前后各垫
-/// 两秒安静，再往后一直是安静（端到端测试不碰主人的麦克风，施工 VO-11下）。另设了 `MIYU_VOICE_TEST_MIC_CUT_IN`（同样的 wav）的，
+/// 测试用：设了 `MIYU_VOICE_TEST_MIC`（一个 16 kHz 单声道的 wav）的不开麦，照实时的快慢把这个文件「听」一遍，前面垫
+/// `MIYU_VOICE_TEST_MIC_LEAD` 秒（不设是两秒）、后面垫两秒安静，再往后一直是安静（端到端测试不碰主人的麦克风，施工 VO-11下、
+/// VO-14）。另设了 `MIYU_VOICE_TEST_MIC_CUT_IN`（同样的 wav）的，
 /// 她第一次开口念的时候把它「听」一遍，测开口就打断（施工 VO-12，要开全双工才收得到）。
 pub fn run(device: Option<&str>, switches: &Switches, mut frame: impl FnMut(&[f32])) {
     if let Some(path) = std::env::var_os("MIYU_VOICE_TEST_MIC") {
@@ -113,7 +113,7 @@ fn listen_while_held(mic: &Mic, switches: &Switches, frame: &mut impl FnMut(&[f3
     }
 }
 
-/// 测试用的「麦克风」：开着才喂，她在说话时不喂（半双工），照实时的快慢。
+/// 测试用的「麦克风」：她在说话时不喂（半双工），照实时的快慢。
 fn play_file(path: &std::path::Path, switches: &Switches, frame: &mut impl FnMut(&[f32])) {
     let read = |path: &std::path::Path| {
         std::fs::read(path)
@@ -126,8 +126,12 @@ fn play_file(path: &std::path::Path, switches: &Switches, frame: &mut impl FnMut
     let mut cut_in = std::env::var_os("MIYU_VOICE_TEST_MIC_CUT_IN")
         .map(|path| read(std::path::Path::new(&path)))
         .unwrap_or_default();
+    let lead = std::env::var("MIYU_VOICE_TEST_MIC_LEAD")
+        .ok()
+        .and_then(|secs| secs.parse::<usize>().ok())
+        .unwrap_or(2);
     let quiet = vec![0.0f32; RATE * 2];
-    let mut audio = quiet.clone();
+    let mut audio = vec![0.0f32; RATE * lead];
     audio.extend(samples);
     audio.extend(&quiet);
     let mut at = 0;
@@ -146,3 +150,6 @@ fn play_file(path: &std::path::Path, switches: &Switches, frame: &mut impl FnMut
         std::thread::sleep(Duration::from_millis(32));
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,7 +1,7 @@
 //! 语音助手（设计 20 第九节）：常驻后台，叫名字就能说，命令 miyu listen。
 //!
 //! 核心照清单 `[process] args` 带 `serve` 拉起（[`service`]）；人敲 `miyu listen …` 时核心把后面的参数原样交过来：命令当
-//! 本机的头连核心，调在跑的助手的 `listen` 开关。唤醒词、人声检测的模型（[`models`]），唤醒词编成唤醒模型认的写法
+//! 本机的头连核心，调在跑的助手的 `listen`，现在就叫她（同喊了唤醒词）。唤醒词、人声检测的模型（[`models`]），唤醒词编成唤醒模型认的写法
 //! （[`keywords`]），听（[`listen`]），收麦（[`capture`]），提示音（[`chime`]）；会话那一段等核心 VA-1。
 
 mod capture;
@@ -18,7 +18,7 @@ use std::process::ExitCode;
 
 use miyu_ext::Extension;
 
-const USAGE: &str = "usage: miyu listen [on|off]                               switch the assistant (no argument: toggle)
+const USAGE: &str = "usage: miyu listen                                      talk to her now, same as saying the wake word
        miyu listen wake-test <wake word>              how the wake word model will hear it
        miyu listen wake-test --wav FILE <wake word>   run a 16 kHz mono wav through the listener";
 
@@ -30,7 +30,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some("wake-test") => wake_test(&args[1..]),
-        None | Some("on" | "off") => match switch(args.first().map_or("toggle", String::as_str)) {
+        None => match wake() {
             Ok(()) => ExitCode::SUCCESS,
             Err(why) => {
                 eprintln!("miyu listen: {why}");
@@ -46,11 +46,11 @@ fn main() -> ExitCode {
 
 fn serve() {
     let dir = |key: &str| std::env::var_os(key).map(PathBuf::from);
-    let (Some(cache), Some(state)) = (dir("MIYU_CACHE_DIR"), dir("MIYU_STATE_DIR")) else {
-        eprintln!("miyu-voice-assistant: MIYU_CACHE_DIR or MIYU_STATE_DIR is not set");
+    let Some(cache) = dir("MIYU_CACHE_DIR") else {
+        eprintln!("miyu-voice-assistant: MIYU_CACHE_DIR is not set");
         std::process::exit(miyu_ext::EXIT_CONFIG);
     };
-    let service = service::Service::new(cache, state);
+    let service = service::Service::new(cache);
     let mut ext = Extension::new("miyu-voice-assistant", env!("CARGO_PKG_VERSION"));
     service.register(&mut ext);
     let on_ready = std::sync::Arc::clone(&service);
@@ -63,24 +63,17 @@ fn serve() {
     ext.run();
 }
 
-/// `miyu listen [on|off]`：连核心，调在跑的助手的开关，印现在开没开。
-fn switch(to: &str) -> Result<(), String> {
+/// `miyu listen`：连核心，叫在跑的助手听（响一声就能说）。
+fn wake() -> Result<(), String> {
     let home = std::env::var_os("MIYU_HOME")
         .map(PathBuf::from)
         .ok_or("MIYU_HOME is not set; run it as `miyu listen`.")?;
     let mut core = voice_common::client::Client::connect(&home, "miyu-listen")?;
-    let answer = core.call(
+    core.call(
         "package.call",
-        &serde_json::json!({"package": "miyu-voice-assistant", "method": "listen", "params": {"to": to}}),
+        &serde_json::json!({"package": "miyu-voice-assistant", "method": "listen", "params": {}}),
     )?;
-    println!(
-        "{}",
-        if answer["listening"] == true {
-            "listening"
-        } else {
-            "not listening"
-        }
-    );
+    println!("listening");
     Ok(())
 }
 

@@ -1,4 +1,4 @@
-//! 提示音（设计 20 第九节）：听到唤醒词响一声（第 2 步），`miyu listen` 开、关各一种声音。自己合成几段短的正弦波，不带
+//! 提示音（设计 20 第九节）：叫醒了响一声（第 2 步；喊了唤醒词、敲了 `miyu listen` 同一声）。自己合成短的正弦波，不带
 //! 音频文件；从本机音箱放（[`voice_common::speaker`]）。
 
 use voice_common::audio;
@@ -10,12 +10,8 @@ const RATE: u32 = 24_000;
 /// 哪一种。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Chime {
-    /// 听到唤醒词：一声短的高音。
+    /// 叫醒了：一声短的高音。
     Wake,
-    /// 开了：低到高两声。
-    On,
-    /// 关了：高到低两声。
-    Off,
 }
 
 /// 这种提示音的 wav 字节。
@@ -23,8 +19,6 @@ pub enum Chime {
 pub fn wav(chime: Chime) -> Vec<u8> {
     let notes: &[(f32, u32)] = match chime {
         Chime::Wake => &[(1320.0, 90)],
-        Chime::On => &[(660.0, 80), (990.0, 110)],
-        Chime::Off => &[(990.0, 80), (660.0, 110)],
     };
     let mut samples = Vec::new();
     for (pitch, ms) in notes {

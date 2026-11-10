@@ -32,7 +32,6 @@ echo "  warm: $(t $W/zh.wav) ms, $(t $W/zh.wav) ms, $(t $W/zh.wav) ms"
 WK=$(pid_of miyu-voice-input recognize-worker | head -1)
 echo "  worker: $(mem $WK), peak RSS $(awk '/VmHWM/{printf "%d MB", $2/1024}' /proc/$WK/status)"
 echo "  voice-input after recognizing: $(mem $VI)"
-$M listen on >/dev/null
 sleep 5
 c0=$(cpu_ms $VA); sleep 30; c1=$(cpu_ms $VA)
 echo "assistant listening to silence (models loaded): $(mem $VA), CPU $(( (c1-c0)*100/30000 )).$(( (c1-c0)*1000/30000 % 10 ))% over 30 s ($((c1-c0)) ms)"

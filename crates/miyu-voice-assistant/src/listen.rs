@@ -180,6 +180,12 @@ impl Listener {
         self.window = open;
     }
 
+    /// 正听着一段人声（还没说完）：等下一句的时间到了也先别关窗口，说完这一句再算（施工 VO-14）。
+    #[must_use]
+    pub fn hearing(&self) -> bool {
+        self.vad.detected()
+    }
+
     /// 喂一帧，交回这一帧以后听到的。
     pub fn feed(&mut self, frame: &[f32]) -> Vec<Event> {
         self.remember(frame);

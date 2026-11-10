@@ -18,8 +18,8 @@
 | 脚本 | 测什么 |
 |---|---|
 | `run-input.sh` | 语音输入：总线上可用、头交 blob 认字、错误码、同一个连接上长的 transcribe 挂着时 stop 先回、关掉以后不可用 |
-| `run-assistant.sh` | 助手：默认关、`miyu listen` 开关、状态文件、重启以后照旧、声卡没开 |
-| `run-turn.sh` | 一整轮：唤醒（「周望军」，KWS 的 5.wav）→ 认字 → voice 场所 → 假模型流式回 → 一句句交 tts。开关：`FULL_DUPLEX=1` 加 `MIYU_VOICE_TEST_MIC_CUT_IN=<wav>` 加 `TTS_DELAY=6` 测开口就打断；`FAKE_CHAT_TOOL=say PERSONA_VOICE=nova` 测照人格挑音色；`MIYU_VOICE_MEASURE=1` 印时延 |
+| `run-assistant.sh` | 助手：装上就去开麦（声卡没开的说一次）、`miyu listen` 叫她、不认的参数、重启以后照旧在听 |
+| `run-turn.sh` | 一整轮：唤醒（「周望军」，KWS 的 5.wav）→ 认字 → voice 场所 → 假模型流式回 → 一句句交 tts。开关：`FULL_DUPLEX=1` 加 `MIYU_VOICE_TEST_MIC_CUT_IN=<wav>` 加 `TTS_DELAY=6` 测开口就打断；`FAKE_CHAT_TOOL=say PERSONA_VOICE=nova` 测照人格挑音色；`MIYU_VOICE_MEASURE=1` 印时延；`BY_COMMAND=1` 不喊唤醒词、敲 `miyu listen` 叫她（假麦克风换成 `model-dl` 的 zh.wav） |
 | `measure.sh` | 量尺：三个程序空闲的 RSS、PSS、私有匿名，识别冷、热的时延，识别子进程的峰值，助手开着听静音时的内存和 CPU |
 
 量出来的数记在 `docs/perf.md`，和上一版自己比。
