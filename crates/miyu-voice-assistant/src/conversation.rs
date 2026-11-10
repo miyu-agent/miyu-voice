@@ -2,14 +2,14 @@
 //! 场所 `voice:local` 里只有主人一个人（核心 VA-1：`voice` 平台的 `owner` 天然算主人，core1 11-10 定 A）。会话一直续下去，
 //! 终端、网页里看得到；`images=false`（说话看不到图）。
 //!
-//! 听到的一句照主人说话交过去（`session.send` 带 `as`）；她的回答照会话推来的增量一句句念（[`crate::reply`]），念交总线上的
-//! `tts.play`；念的时候半双工不收麦（第 7 步）。一轮完了、念完了，开 30 秒追问窗口（第 5 步）：窗口开着说话不用再叫她；
+//! 听到的一句照主人说话交过去（`session.send` 带 `as`）；她的回答照会话推来的增量一句句念（[`crate::reply`]）：一句句交
+//! 总线上的 `tts.synthesize`，放这一句时下一句已经在合，合好的交 `tts.play`；念的时候半双工不收麦（第 7 步）。一轮完了、念完了，开 30 秒追问窗口（第 5 步）：窗口开着说话不用再叫她；
 //! 她想、说的时候窗口一直开着，不计时。总线上没有 `tts`（没装、没配朗读）的只听不说，回答照样在各个头里看得到。
 //!
 //! 开口就打断（第 6 步，施工 VO-12）：戴耳机开了全双工的，她念的时候你一开口，排着没念的丢掉、`tts.stop` 停掉正在念的、
 //! 打断这一轮，会话里补一块事实写明你听到哪一句为止、后面的没念出来（她下一轮知道你没听到后半截）。
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -241,52 +241,149 @@ struct Turn {
     persona: Option<String>,
 }
 
-/// 念的那个线程：一句句交总线上的 `tts.play`，念的时候半双工不收麦（全双工的照收，好听得见打断）；一轮完了、念完了开追问窗口。
+/// 合好、排着放的。
+enum Ready {
+    /// 一句：合好的音频（blob）、原文、交出去时的打断次数。
+    Sentence(String, String, u64),
+    /// 这一轮完了。
+    TurnEnded,
+}
+
+/// 念的那两个线程（施工 VO-15）：合成的一个照先后交总线上的 `tts.synthesize`，合好的排给放的一个交 `tts.play`；放这一句
+/// 的时候下一句已经在合，句子之间不再等合成（原来一句放完才去合下一句，云端合成一两秒，句与句之间断一下）。
+///
+/// 还有没念完的句子（在合的、排着的、在放的）就算她在说话：半双工不收麦，全双工照收，好听得见打断；一轮完了、念完了开
+/// 追问窗口。合不了、放不了（没装、没配朗读，没有音箱）的这一轮只听不说，说一次就不再试，下一轮重新试。
 fn speak_in_turn(core: Core, switches: Switches, turn: Turn, queue: mpsc::Receiver<Spoken>) {
+    let (ready, to_play) = mpsc::channel::<Ready>();
+    let speaking = Arc::new(Speaking {
+        switches,
+        unsaid: AtomicUsize::new(0),
+        mute: AtomicBool::new(false),
+    });
+    let synthesizing = (core.clone(), Arc::clone(&speaking));
+    let (generation, persona) = (Arc::clone(&turn.generation), turn.persona.clone());
     std::thread::spawn(move || {
-        let mut mute = false;
-        for spoken in queue {
-            match spoken {
-                Spoken::Sentence(sentence, generation) => {
-                    if mute || generation != turn.generation.load(Ordering::SeqCst) {
-                        continue;
+        synthesize_ahead(
+            &synthesizing.0,
+            &synthesizing.1,
+            &generation,
+            persona.as_deref(),
+            queue,
+            &ready,
+        );
+    });
+    std::thread::spawn(move || play_in_order(&core, &speaking, &turn, to_play));
+}
+
+/// 两个线程共用的：还有几句没念完（在合的、排着的、在放的，有就算她在说话），这一轮还念不念。
+struct Speaking {
+    switches: Switches,
+    unsaid: AtomicUsize,
+    mute: AtomicBool,
+}
+
+impl Speaking {
+    /// 要念一句了：算她在说话。
+    fn begin(&self) {
+        self.unsaid.fetch_add(1, Ordering::SeqCst);
+        self.switches.speaking.store(true, Ordering::SeqCst);
+    }
+
+    /// 一句念完、丢掉、念不成：最后一句的话她不说了。
+    fn end(&self) {
+        if self.unsaid.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.switches.speaking.store(false, Ordering::SeqCst);
+        }
+    }
+}
+
+/// 合成的线程：一句句交 `tts.synthesize`（wav），合好的交给放的线程；打断过的（打断次数对不上）、这一轮不念了的跳过。
+fn synthesize_ahead(
+    core: &Core,
+    speaking: &Speaking,
+    generation: &AtomicU64,
+    persona: Option<&str>,
+    queue: mpsc::Receiver<Spoken>,
+    ready: &mpsc::Sender<Ready>,
+) {
+    for spoken in queue {
+        match spoken {
+            Spoken::Sentence(sentence, mine) => {
+                if speaking.mute.load(Ordering::SeqCst) || mine != generation.load(Ordering::SeqCst)
+                {
+                    continue;
+                }
+                speaking.begin();
+                let synthesized = core.call(
+                    "bus.call",
+                    json!({"name": "tts", "method": "synthesize",
+                           "params": {"text": sentence, "persona": persona, "format": "wav"}}),
+                );
+                match synthesized {
+                    Ok(answer) if answer["audio"].is_string() => {
+                        let audio = answer["audio"].as_str().unwrap_or_default().to_string();
+                        let _ = ready.send(Ready::Sentence(audio, sentence, mine));
                     }
+                    other => {
+                        let why = other
+                            .map_or_else(|error| error.to_string(), |answer| answer.to_string());
+                        eprintln!("miyu-voice-assistant: tts: {why}");
+                        speaking.mute.store(true, Ordering::SeqCst);
+                        speaking.end();
+                    }
+                }
+            }
+            Spoken::TurnEnded => {
+                speaking.mute.store(false, Ordering::SeqCst);
+                let _ = ready.send(Ready::TurnEnded);
+            }
+        }
+    }
+}
+
+/// 放的线程：照先后交 `tts.play`；放完的记下（打断时写明听到哪一句）；一轮完了开追问窗口。
+fn play_in_order(core: &Core, speaking: &Speaking, turn: &Turn, to_play: mpsc::Receiver<Ready>) {
+    for next in to_play {
+        match next {
+            Ready::Sentence(audio, sentence, mine) => {
+                if !speaking.mute.load(Ordering::SeqCst)
+                    && mine == turn.generation.load(Ordering::SeqCst)
+                {
                     if std::env::var_os("MIYU_VOICE_MEASURE").is_some() {
                         eprintln!("miyu-voice-assistant: measure: speaking \"{sentence}\"");
                     }
-                    switches.speaking.store(true, Ordering::SeqCst);
                     let played = core.call(
                         "bus.call",
-                        json!({"name": "tts", "method": "play",
-                               "params": {"text": sentence, "persona": turn.persona}}),
+                        json!({"name": "tts", "method": "play", "params": {"audio": audio}}),
                     );
-                    switches.speaking.store(false, Ordering::SeqCst);
-                    if matches!(&played, Ok(answer) if answer["finished"] == true) {
-                        turn.played
+                    match played {
+                        Ok(answer) if answer["finished"] == true => turn
+                            .played
                             .lock()
                             .unwrap_or_else(PoisonError::into_inner)
-                            .push(sentence);
-                    }
-                    if let Err(error) = played {
-                        // 没装、没配朗读：只听不说，说一次就不再试（下一轮重新试，配好了就能念）。
-                        eprintln!("miyu-voice-assistant: tts: {error}");
-                        mute = true;
+                            .push(sentence),
+                        Ok(_) => {}
+                        Err(error) => {
+                            eprintln!("miyu-voice-assistant: tts: {error}");
+                            speaking.mute.store(true, Ordering::SeqCst);
+                        }
                     }
                 }
-                Spoken::TurnEnded => {
-                    mute = false;
-                    turn.played
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .clear();
-                    let mut window = turn.window.lock().unwrap_or_else(PoisonError::into_inner);
-                    window.in_turn = false;
-                    window.until =
-                        (!std::mem::take(&mut window.closed)).then(|| Instant::now() + FOLLOW_UP);
-                }
+                speaking.end();
+            }
+            Ready::TurnEnded => {
+                turn.played
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clear();
+                let mut window = turn.window.lock().unwrap_or_else(PoisonError::into_inner);
+                window.in_turn = false;
+                window.until =
+                    (!std::mem::take(&mut window.closed)).then(|| Instant::now() + FOLLOW_UP);
             }
         }
-    });
+    }
 }
 
 #[cfg(test)]

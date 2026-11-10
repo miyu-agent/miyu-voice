@@ -1,5 +1,6 @@
 //! 从本机的音箱放（设计 20 第三节「形状」`tts.play`、`tts.stop`）：几个一起来照先后排队，一个放完放下一个，不互相打断；
-//! `stop` 把正在放的和排着的全停掉。音箱只在有东西要放的时候开着，队列空了就关，不占着声卡。mp3、wav 都认（rodio）。
+//! `stop` 把正在放的和排着的全停掉。音箱只在有东西要放的时候开着，队列空了等 [`LINGER`] 还没有新的才关，不一直占着声卡；
+//! 一句接一句念的（语音助手）不用每句重开一次（施工 VO-15：重开那一下句子之间听得出停顿）。mp3、wav 都认（rodio）。
 
 use std::io::Cursor;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -17,9 +18,17 @@ pub enum PlayError {
     NoSpeaker(String),
 }
 
+/// 队列空了以后音箱再开多久：下一句在这之内来的接着放，不重开。
+pub const LINGER: Duration = Duration::from_millis(1500);
+
 /// 本机的音箱。
 #[derive(Default)]
 pub struct Speaker {
+    inner: Arc<Inner>,
+}
+
+#[derive(Default)]
+struct Inner {
     /// 轮到谁放：拿着它的那一个在放。
     turn: Mutex<()>,
     /// 每叫停一次加一：排着的、在放的看到变了就停。
@@ -28,6 +37,8 @@ pub struct Speaker {
     pending: AtomicUsize,
     /// 开着的音箱、在放的那一个。
     open: Mutex<Option<Open>>,
+    /// 放过几段：等着关音箱的看到变了（又放了新的）就不关。
+    uses: AtomicU64,
 }
 
 struct Open {
@@ -42,21 +53,33 @@ impl Speaker {
     ///
     /// 音频读不出来；没有音箱。
     pub fn play(&self, audio: Vec<u8>) -> Result<bool, PlayError> {
-        let mine = self.generation.load(Ordering::SeqCst);
-        self.pending.fetch_add(1, Ordering::SeqCst);
-        let finished = self.play_in_turn(audio, mine);
-        if self.pending.fetch_sub(1, Ordering::SeqCst) == 1 {
-            // 最后一个放完了：关音箱。
-            *self.open.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        let inner = &self.inner;
+        let mine = inner.generation.load(Ordering::SeqCst);
+        inner.pending.fetch_add(1, Ordering::SeqCst);
+        let used = inner.uses.fetch_add(1, Ordering::SeqCst) + 1;
+        let finished = inner.play_in_turn(audio, mine);
+        if inner.pending.fetch_sub(1, Ordering::SeqCst) == 1 {
+            // 最后一个放完了：等一会儿，还没有新的再关音箱。
+            let inner = Arc::clone(inner);
+            std::thread::spawn(move || {
+                std::thread::sleep(LINGER);
+                let mut open = inner.open.lock().unwrap_or_else(PoisonError::into_inner);
+                if inner.pending.load(Ordering::SeqCst) == 0
+                    && inner.uses.load(Ordering::SeqCst) == used
+                {
+                    *open = None;
+                }
+            });
         }
         finished
     }
 
     /// 正在放的、排着的全停；交回停了几个。
     pub fn stop(&self) -> usize {
-        let stopped = self.pending.load(Ordering::SeqCst);
-        self.generation.fetch_add(1, Ordering::SeqCst);
-        if let Some(open) = self
+        let inner = &self.inner;
+        let stopped = inner.pending.load(Ordering::SeqCst);
+        inner.generation.fetch_add(1, Ordering::SeqCst);
+        if let Some(open) = inner
             .open
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -67,7 +90,9 @@ impl Speaker {
         }
         stopped
     }
+}
 
+impl Inner {
     fn play_in_turn(&self, audio: Vec<u8>, mine: u64) -> Result<bool, PlayError> {
         let decoder = Decoder::try_from(Cursor::new(audio))
             .map_err(|error| PlayError::BadAudio(format!("The audio cannot be read: {error}.")))?;
