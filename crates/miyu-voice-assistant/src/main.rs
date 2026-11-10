@@ -10,6 +10,7 @@ mod conversation;
 mod keywords;
 mod listen;
 mod models;
+mod notify;
 mod reply;
 mod service;
 

@@ -11,6 +11,7 @@ use voice_common::mic::Mic;
 use voice_common::mic_lock::MicLock;
 
 use crate::listen::RATE;
+use crate::notify::{Notice, Notifier, Step};
 
 /// 一帧多少个采样（16 kHz 下 32 毫秒，同人声检测的窗）。
 pub const FRAME: usize = 512;
@@ -48,7 +49,12 @@ impl Switches {
 /// `MIYU_VOICE_TEST_MIC_LEAD` 秒（不设是两秒）、后面垫两秒安静，再往后一直是安静（端到端测试不碰主人的麦克风，施工 VO-11下、
 /// VO-14）。另设了 `MIYU_VOICE_TEST_MIC_CUT_IN`（同样的 wav）的，
 /// 她第一次开口念的时候把它「听」一遍，测开口就打断（施工 VO-12，要开全双工才收得到）。
-pub fn run(device: Option<&str>, switches: &Switches, mut frame: impl FnMut(&[f32])) {
+pub fn run(
+    device: Option<&str>,
+    switches: &Switches,
+    notifier: &Notifier,
+    mut frame: impl FnMut(&[f32]),
+) {
     if let Some(path) = std::env::var_os("MIYU_VOICE_TEST_MIC") {
         play_file(&std::path::PathBuf::from(path), switches, &mut frame);
         return;
@@ -69,6 +75,7 @@ pub fn run(device: Option<&str>, switches: &Switches, mut frame: impl FnMut(&[f3
                 // 同一句只说一次，免得没插麦的机器把日志写满。
                 if warned.as_deref() != Some(why.as_str()) {
                     eprintln!("miyu-voice-assistant: {why}");
+                    notifier.show(Notice::Trouble(Step::Microphone, why.clone()));
                     warned = Some(why);
                 }
                 drop(lock);

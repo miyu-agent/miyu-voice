@@ -7,6 +7,8 @@ CORE=${MIYU_CORE:?set MIYU_CORE to a built core checkout}
 M=$CORE/target/release/miyu
 V=$(cd "$(dirname "$0")/../.." && pwd)
 export MIYU_HOME=$S/e2e-home XDG_RUNTIME_DIR=$S/e2e-run MIYU_RESOURCES=$CORE/resources ALSA_CONFIG_PATH=/dev/null
+# 通知不往桌面上弹，一条一行记进文件（施工 VO-16）。
+export MIYU_VOICE_TEST_NOTICES=$S/notices.log; rm -f $S/notices.log
 rm -rf $MIYU_HOME $S/e2e-pkg; mkdir -p $MIYU_HOME $XDG_RUNTIME_DIR; chmod 700 $XDG_RUNTIME_DIR
 for id in miyu-voice-input miyu-say miyu-voice-assistant; do mkdir -p $S/e2e-pkg/$id/bin; cp $V/package/$id/package.toml $S/e2e-pkg/$id/; cp $V/target/release/$id $S/e2e-pkg/$id/bin/; done
 $M core > $S/core.log 2>&1 & CP=$!
@@ -23,6 +25,7 @@ P=$(pid_of miyu-voice-assistant | head -1)
 echo "1. assistant running: pid ${P:-none}; resident: $(grep VmRSS /proc/$P/status | tr -s " \t" " ")"
 echo "   sound devices open: $(ls -l /proc/$P/fd 2>/dev/null | grep -c /dev/snd) (none here: ALSA has no devices)"
 echo "   stderr (tried the microphone right away, said it once): $(tail -3 $MIYU_HOME/var/log/miyu-voice-assistant/stderr 2>/dev/null | tr '\n' '|')"
+echo "   notices: $(cat $S/notices.log 2>/dev/null | tr '\n' '|')"
 echo "2. miyu listen:     $($M listen 2>&1), again: $($M listen 2>&1)"
 echo "   on: $($M listen on 2>&1), on: $($M listen on 2>&1), off: $($M listen off 2>&1), off: $($M listen off 2>&1)"
 echo "3. bad argument:    $($M listen sideways 2>&1 | head -1)"
@@ -31,3 +34,4 @@ python3 -I $V/tools/e2e/head.py $MIYU_HOME 'package.restart {"package": "miyu-vo
 sleep 3; P=$(pid_of miyu-voice-assistant | head -1)
 echo "4. after restart:   pid ${P:-none}, miyu listen -> $($M listen 2>&1) (a conversation does not outlive a restart; the wake word still works)"
 echo "   stderr: $(tail -2 $MIYU_HOME/var/log/miyu-voice-assistant/stderr 2>/dev/null | tr '\n' '|')"
+echo "5. notices:         $(cat $S/notices.log 2>/dev/null | tr '\n' '|')"

@@ -18,6 +18,7 @@ use miyu_ext::Core;
 use serde_json::{Value, json};
 
 use crate::capture::Switches;
+use crate::notify::{Notice, Notifier, Step};
 use crate::reply::Reply;
 
 /// 场所编号。
@@ -62,6 +63,9 @@ pub struct Conversation {
     generation: Arc<AtomicU64>,
     /// 这一轮念完了的句子。
     played: Arc<Mutex<Vec<String>>>,
+    /// 这一轮她说了的（一句句交出去念的连起来）：通知里跟着写。
+    said: Mutex<String>,
+    notifier: Arc<Notifier>,
 }
 
 /// 交给念的那个线程的。
@@ -78,7 +82,11 @@ impl Conversation {
     /// # Errors
     ///
     /// 核心拒了（没批 `act_for_external`、`events.read`）。
-    pub fn open(core: &Core, switches: &Switches) -> Result<Arc<Conversation>, String> {
+    pub fn open(
+        core: &Core,
+        switches: &Switches,
+        notifier: &Arc<Notifier>,
+    ) -> Result<Arc<Conversation>, String> {
         let opened = core
             .call(
                 "venue.session",
@@ -112,6 +120,7 @@ impl Conversation {
                 persona,
             },
             queue,
+            Arc::clone(notifier),
         );
         Ok(Arc::new(Conversation {
             session,
@@ -120,6 +129,8 @@ impl Conversation {
             sent: AtomicU64::new(0),
             generation,
             played,
+            said: Mutex::new(String::new()),
+            notifier: Arc::clone(notifier),
         }))
     }
 
@@ -162,7 +173,14 @@ impl Conversation {
         .map_err(|error| format!("session.send: {error}"))
     }
 
+    /// 她说的一句：记进这一轮说了的、通知跟着写，交出去念。
     fn sentence(&self, text: String) -> Spoken {
+        let mut said = self.said.lock().unwrap_or_else(PoisonError::into_inner);
+        said.push_str(&text);
+        self.notifier.show(Notice::Reply {
+            text: said.clone(),
+            done: false,
+        });
         Spoken::Sentence(text, self.generation.load(Ordering::SeqCst))
     }
 
@@ -225,6 +243,14 @@ impl Conversation {
                 if let Some(rest) = reply.finish() {
                     let _ = self.sentences.send(self.sentence(rest));
                 }
+                let said =
+                    std::mem::take(&mut *self.said.lock().unwrap_or_else(PoisonError::into_inner));
+                if !said.is_empty() {
+                    self.notifier.show(Notice::Reply {
+                        text: said,
+                        done: true,
+                    });
+                }
                 let _ = self.sentences.send(Spoken::TurnEnded);
             }
             _ => {}
@@ -254,9 +280,16 @@ enum Ready {
 ///
 /// 还有没念完的句子（在合的、排着的、在放的）就算她在说话：半双工不收麦，全双工照收，好听得见打断；一轮完了、念完了开
 /// 追问窗口。合不了、放不了（没装、没配朗读，没有音箱）的这一轮只听不说，说一次就不再试，下一轮重新试。
-fn speak_in_turn(core: Core, switches: Switches, turn: Turn, queue: mpsc::Receiver<Spoken>) {
+fn speak_in_turn(
+    core: Core,
+    switches: Switches,
+    turn: Turn,
+    queue: mpsc::Receiver<Spoken>,
+    notifier: Arc<Notifier>,
+) {
     let (ready, to_play) = mpsc::channel::<Ready>();
     let speaking = Arc::new(Speaking {
+        notifier,
         switches,
         unsaid: AtomicUsize::new(0),
         mute: AtomicBool::new(false),
@@ -278,6 +311,7 @@ fn speak_in_turn(core: Core, switches: Switches, turn: Turn, queue: mpsc::Receiv
 
 /// 两个线程共用的：还有几句没念完（在合的、排着的、在放的，有就算她在说话），这一轮还念不念。
 struct Speaking {
+    notifier: Arc<Notifier>,
     switches: Switches,
     unsaid: AtomicUsize,
     mute: AtomicBool,
@@ -288,6 +322,14 @@ impl Speaking {
     fn begin(&self) {
         self.unsaid.fetch_add(1, Ordering::SeqCst);
         self.switches.speaking.store(true, Ordering::SeqCst);
+    }
+
+    /// 念不成（合不了、放不了）：这一轮只听不说，通知里说一次为什么。
+    fn fail(&self, why: String) {
+        eprintln!("miyu-voice-assistant: tts: {why}");
+        if !self.mute.swap(true, Ordering::SeqCst) {
+            self.notifier.show(Notice::Trouble(Step::Speech, why));
+        }
     }
 
     /// 一句念完、丢掉、念不成：最后一句的话她不说了。
@@ -328,8 +370,7 @@ fn synthesize_ahead(
                     other => {
                         let why = other
                             .map_or_else(|error| error.to_string(), |answer| answer.to_string());
-                        eprintln!("miyu-voice-assistant: tts: {why}");
-                        speaking.mute.store(true, Ordering::SeqCst);
+                        speaking.fail(why);
                         speaking.end();
                     }
                 }
@@ -364,10 +405,7 @@ fn play_in_order(core: &Core, speaking: &Speaking, turn: &Turn, to_play: mpsc::R
                             .unwrap_or_else(PoisonError::into_inner)
                             .push(sentence),
                         Ok(_) => {}
-                        Err(error) => {
-                            eprintln!("miyu-voice-assistant: tts: {error}");
-                            speaking.mute.store(true, Ordering::SeqCst);
-                        }
+                        Err(error) => speaking.fail(error.to_string()),
                     }
                 }
                 speaking.end();

@@ -16,6 +16,9 @@ path = "src/main.rs"
 sherpa-onnx = "=2.0.1"
 # 唤醒词里的汉字注带调拼音（keywords.rs，同旧版）。
 pinyin = "0.11.0"
+# 系统通知（notify.rs，施工 VO-16）：Linux 是会话 D-Bus 上的 freedesktop 通知（zbus，纯 Rust），macOS、Windows 是系统的；
+# 同托盘程序 miyu-applet 钉的那一版。
+notify-rust = "=4.18.2"
 miyu-ext.workspace = true
 serde_json.workspace = true
 voice-common = { workspace = true, features = ["mic", "speaker"] }

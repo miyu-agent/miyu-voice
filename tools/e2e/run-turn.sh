@@ -9,6 +9,8 @@ CORE=${MIYU_CORE:?set MIYU_CORE to a built core checkout}
 M=$CORE/target/release/miyu
 V=$(cd "$(dirname "$0")/../.." && pwd)
 export MIYU_HOME=$S/e2e-home XDG_RUNTIME_DIR=$S/e2e-run MIYU_RESOURCES=$CORE/resources ALSA_CONFIG_PATH=${ALSA_CONFIG_PATH:-/dev/null}
+# 通知不往桌面上弹，一条一行记进文件（施工 VO-16）。
+export MIYU_VOICE_TEST_NOTICES=$S/notices.log; rm -f $S/notices.log
 export MIYU_VOICE_TEST_MIC=$S/kws-dl/x/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/test_wavs/5.wav
 [ -z "${BY_COMMAND:-}" ] || export MIYU_VOICE_TEST_MIC=$(ls $S/model-dl/x/*/test_wavs/zh.wav | head -1) MIYU_VOICE_TEST_MIC_LEAD=6
 rm -rf $MIYU_HOME $S/e2e-pkg $S/fake.log $S/chat.log; mkdir -p $MIYU_HOME $XDG_RUNTIME_DIR; chmod 700 $XDG_RUNTIME_DIR
@@ -38,6 +40,7 @@ echo "--- bus"; $M bus list 2>&1 | tail -3
 [ -z "${BY_COMMAND:-}" ] || echo "--- miyu listen: $($M listen 2>&1)"
 sleep ${WAIT:-20}
 [ -z "${BY_COMMAND:-}" ] || echo "--- miyu listen off: $($M listen off 2>&1)"
+echo "--- notices"; cat $S/notices.log 2>/dev/null
 echo "--- assistant stderr"; tail -8 $MIYU_HOME/var/log/miyu-voice-assistant/stderr 2>/dev/null
 echo "--- what the model was sent (last user message)"; python3 -I -c "import json,sys; ls=[json.loads(l) for l in open(sys.argv[1])]; m=ls[-1]['messages'] if ls else []; print([x for x in m if x['role']=='user'][-1:] if m else 'nothing'); print('spoken fact present:', any('spoken' in json.dumps(x) for x in m))" $S/chat.log 2>&1
 echo "--- what tts was asked to say"; python3 -I -c "import json,sys; [print(json.loads(l)['body']['input'], '| voice', json.loads(l)['body']['voice'], '| speed', json.loads(l)['body']['speed']) for l in open(sys.argv[1])]" $S/fake.log 2>&1

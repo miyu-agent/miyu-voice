@@ -21,6 +21,7 @@ use crate::conversation::Conversation;
 use crate::keywords;
 use crate::listen::{Event, Listener, RATE, Sensitivity};
 use crate::models::Models;
+use crate::notify::{Notice, Notifier, Step};
 use crate::reply::Reply;
 
 /// 唤醒以后等下一句多久（只说了唤醒词的）：这么久还没开口就不等了，开了口的等这一句说完。
@@ -86,6 +87,7 @@ pub struct Service {
     cache: PathBuf,
     switches: Switches,
     speaker: Speaker,
+    notifier: Arc<Notifier>,
     settings: Mutex<Settings>,
     conversation: Mutex<Option<Arc<Conversation>>>,
     reply: Mutex<Reply>,
@@ -99,6 +101,7 @@ impl Service {
             cache,
             switches: Switches::default(),
             speaker: Speaker::default(),
+            notifier: Arc::new(Notifier::start()),
             settings: Mutex::new(Settings::from_config(&Map::new())),
             conversation: Mutex::new(None),
             reply: Mutex::new(Reply::default()),
@@ -132,6 +135,7 @@ impl Service {
 
     /// 配置变了：重读（唤醒词变了的，下一次开麦时照新的建）。
     pub fn reload(&self, core: &Core) {
+        self.notifier.set_language(&core.language());
         let settings = Settings::from_config(&core.config());
         self.switches
             .full_duplex
@@ -154,7 +158,7 @@ impl Service {
         // 听的那一套（两个模型，约 40 MB）第一次真的开麦收到声音时才建：装上没开的助手只占几 MB。
         let mut listener: Option<Listener> = None;
         let mut unbuildable = false;
-        match Conversation::open(core, &self.switches) {
+        match Conversation::open(core, &self.switches, &self.notifier) {
             Ok(conversation) => {
                 *self
                     .conversation
@@ -170,58 +174,66 @@ impl Service {
         let microphone = Some(settings.microphone.clone()).filter(|name| !name.is_empty());
         std::thread::spawn(move || {
             let mut awaiting = None::<Instant>;
-            capture::run(microphone.as_deref(), &service.switches, |frame| {
-                if listener.is_none() && !unbuildable {
-                    match build_listener(&models, &settings) {
-                        Ok(built) => listener = Some(built),
-                        Err(why) => {
-                            eprintln!("miyu-voice-assistant: {why}");
-                            unbuildable = true;
-                        }
-                    }
-                }
-                let Some(listener) = listener.as_mut() else {
-                    return;
-                };
-                let switches = &service.switches;
-                if switches.ended.swap(false, Ordering::SeqCst)
-                    || awaiting.is_some_and(|since| since.elapsed() > AWAIT) && !listener.hearing()
-                {
-                    awaiting = None;
-                }
-                // 窗口：`miyu listen` 开着的对话，唤醒以后等下一句的 8 秒，她在想、在说，念完以后的追问窗口。
-                let follow_up = service
-                    .conversation()
-                    .is_some_and(|conversation| conversation.window_open());
-                let open = switches.held.load(Ordering::SeqCst) || awaiting.is_some() || follow_up;
-                switches.open.store(open, Ordering::SeqCst);
-                listener.set_window(open);
-                for event in listener.feed(frame) {
-                    match event {
-                        Event::Wake { rest, .. } => {
-                            woken(&barge_core, &service.speaker);
-                            if rest.is_empty() {
-                                awaiting = Some(Instant::now());
-                            } else {
-                                let _ = utterances.send(rest);
-                            }
-                        }
-                        Event::Speech(audio) => {
-                            awaiting = None;
-                            let _ = utterances.send(audio);
-                        }
-                        // 她正念着、你开口了（只有全双工收得到）：打断。打断要等核心回，另开线程，不耽误收麦。
-                        Event::Onset => {
-                            if service.switches.speaking.load(Ordering::SeqCst)
-                                && let Some(conversation) = service.conversation()
-                            {
-                                let core = barge_core.clone();
-                                std::thread::spawn(move || conversation.barge_in(&core));
+            capture::run(
+                microphone.as_deref(),
+                &service.switches,
+                &service.notifier,
+                |frame| {
+                    if listener.is_none() && !unbuildable {
+                        match build_listener(&models, &settings) {
+                            Ok(built) => listener = Some(built),
+                            Err(why) => {
+                                eprintln!("miyu-voice-assistant: {why}");
+                                unbuildable = true;
                             }
                         }
                     }
-                }
-            });
+                    let Some(listener) = listener.as_mut() else {
+                        return;
+                    };
+                    let switches = &service.switches;
+                    if switches.ended.swap(false, Ordering::SeqCst)
+                        || awaiting.is_some_and(|since| since.elapsed() > AWAIT)
+                            && !listener.hearing()
+                    {
+                        awaiting = None;
+                    }
+                    // 窗口：`miyu listen` 开着的对话，唤醒以后等下一句的 8 秒，她在想、在说，念完以后的追问窗口。
+                    let follow_up = service
+                        .conversation()
+                        .is_some_and(|conversation| conversation.window_open());
+                    let open =
+                        switches.held.load(Ordering::SeqCst) || awaiting.is_some() || follow_up;
+                    switches.open.store(open, Ordering::SeqCst);
+                    listener.set_window(open);
+                    for event in listener.feed(frame) {
+                        match event {
+                            Event::Wake { rest, .. } => {
+                                woken(&barge_core, &service.speaker);
+                                service.notifier.show(Notice::Listening);
+                                if rest.is_empty() {
+                                    awaiting = Some(Instant::now());
+                                } else {
+                                    let _ = utterances.send(rest);
+                                }
+                            }
+                            Event::Speech(audio) => {
+                                awaiting = None;
+                                let _ = utterances.send(audio);
+                            }
+                            // 她正念着、你开口了（只有全双工收得到）：打断。打断要等核心回，另开线程，不耽误收麦。
+                            Event::Onset => {
+                                if service.switches.speaking.load(Ordering::SeqCst)
+                                    && let Some(conversation) = service.conversation()
+                                {
+                                    let core = barge_core.clone();
+                                    std::thread::spawn(move || conversation.barge_in(&core));
+                                }
+                            }
+                        }
+                    }
+                },
+            );
         });
     }
 
@@ -234,27 +246,38 @@ impl Service {
             let measure = std::env::var_os("MIYU_VOICE_MEASURE").is_some();
             for audio in heard {
                 let started = Instant::now();
-                let Some(text) = understand(&worker_core, &audio) else {
-                    continue;
+                let notifier = &service.notifier;
+                let text = match understand(&worker_core, &audio) {
+                    Ok(Some(text)) => text,
+                    Ok(None) => {
+                        notifier.show(Notice::NotHeard);
+                        continue;
+                    }
+                    Err(why) => {
+                        eprintln!("miyu-voice-assistant: stt: {why}");
+                        notifier.show(Notice::Trouble(Step::Recognition, why));
+                        continue;
+                    }
                 };
                 let heard_at = started.elapsed();
-                match service.conversation() {
-                    Some(conversation) => {
-                        if let Err(why) = conversation.say(&worker_core, &text) {
-                            eprintln!("miyu-voice-assistant: {why}");
-                        }
-                        if measure {
-                            eprintln!(
-                                "miyu-voice-assistant: measure: {} ms of speech, stt {} ms, sent {} ms",
-                                audio.len() * 1000 / RATE,
-                                heard_at.as_millis(),
-                                started.elapsed().as_millis()
-                            );
-                        }
-                    }
-                    None => {
-                        eprintln!("miyu-voice-assistant: heard \"{text}\" but there is no session");
-                    }
+                let Some(conversation) = service.conversation() else {
+                    let why = format!("heard \"{text}\" but there is no session");
+                    eprintln!("miyu-voice-assistant: {why}");
+                    notifier.show(Notice::Trouble(Step::Sending, why));
+                    continue;
+                };
+                notifier.show(Notice::Heard(text.clone()));
+                if let Err(why) = conversation.say(&worker_core, &text) {
+                    eprintln!("miyu-voice-assistant: {why}");
+                    notifier.show(Notice::Trouble(Step::Sending, why));
+                }
+                if measure {
+                    eprintln!(
+                        "miyu-voice-assistant: measure: {} ms of speech, stt {} ms, sent {} ms",
+                        audio.len() * 1000 / RATE,
+                        heard_at.as_millis(),
+                        started.elapsed().as_millis()
+                    );
                 }
             }
         });
@@ -277,8 +300,12 @@ fn warm_up(core: &Core) {
     }
 }
 
-/// 认一句：存成 wav 的 blob，交总线上的 `stt`；听清了交回字（第 3 步：太短的、没把握的不交）。
-fn understand(core: &Core, audio: &[f32]) -> Option<String> {
+/// 认一句：存成 wav 的 blob，交总线上的 `stt`；听清了交回字，太短的、没把握的交回 `None`（第 3 步：不交给她）。
+///
+/// # Errors
+///
+/// 存不了、`stt` 拒了（没装、没起来、出错）：为什么。
+fn understand(core: &Core, audio: &[f32]) -> Result<Option<String>, String> {
     let wav = audio::write_wav(audio, u32::try_from(RATE).unwrap_or(16_000));
     let heard = blobs::put(core, &wav, "heard.wav", "audio/wav")
         .map_err(|error| error.to_string())
@@ -289,14 +316,11 @@ fn understand(core: &Core, audio: &[f32]) -> Option<String> {
             )
             .map_err(|error| error.to_string())
         });
-    match heard {
-        Ok(answer) if answer["clear"] == true => answer["text"].as_str().map(str::to_string),
-        Ok(_) => None,
-        Err(why) => {
-            eprintln!("miyu-voice-assistant: stt: {why}");
-            None
-        }
-    }
+    heard.map(|answer| {
+        (answer["clear"] == true)
+            .then(|| answer["text"].as_str().map(str::to_string))
+            .flatten()
+    })
 }
 
 impl Service {
@@ -316,11 +340,15 @@ impl Service {
                 ));
             }
         };
-        switches.held.store(on, Ordering::SeqCst);
+        let held = switches.held.swap(on, Ordering::SeqCst);
         if on {
             switches.open.store(true, Ordering::SeqCst);
             if !now {
                 woken(core, &self.speaker);
+            }
+            // 喊唤醒词叫来的那段里开：变成一直开着的对话，也说一声；已经开着的不再说。
+            if !held {
+                self.notifier.show(Notice::ConversationOn);
             }
         } else {
             switches.ended.store(true, Ordering::SeqCst);
@@ -331,6 +359,7 @@ impl Service {
             }
             if now {
                 chime::play(&self.speaker, Chime::Off);
+                self.notifier.show(Notice::ConversationOff);
             }
         }
         Ok(json!({"listening": on}))
