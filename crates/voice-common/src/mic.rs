@@ -1,4 +1,5 @@
-//! 打开本机的麦克风（设计 20 第三节 `stt.record`、第九节助手）：照设备名选、选不到用系统默认的（第十一节），几个声道平均
+//! 打开本机的麦克风（设计 20 第三节 `stt.record`、第九节助手）：照配置里选的那个开、选不到用系统默认的（第十一节）；Linux 上
+//! 有声音服务（PipeWire、PulseAudio）的经它开，不直接占声卡，没有的经 ALSA（施工 VO-22）。几个声道平均
 //! 成一个，一块块交出来。听写和助手共用；锁不在这里（[`crate::mic_lock`]）。
 
 use std::sync::mpsc;
@@ -7,27 +8,91 @@ use std::sync::{Arc, Mutex, PoisonError};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample};
 
-/// 这台电脑上能选的麦克风的设备名，照系统列的先后，重名的只留一个（配置页的下拉用，施工 VO-21）。只列名字，不开麦克风。
-#[must_use]
-pub fn names() -> Vec<String> {
-    let Ok(devices) = cpal::default_host().input_devices() else {
-        return Vec::new();
+/// 系统是照哪一套列设备的。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Listing {
+    /// 声音服务（PipeWire 的 PulseAudio 接口、PulseAudio）：列的是它的一个个来源，同系统声音设置里的。
+    Server,
+    /// ALSA（Linux 上没有声音服务时）。
+    Alsa,
+    /// macOS、Windows。
+    Plain,
+}
+
+/// 系统列的一个能录音的设备。
+struct Found {
+    /// 这一套里不变的编号（声音服务的来源名）。
+    id: String,
+    /// 给人看的名字。
+    name: String,
+    driver: Option<String>,
+}
+
+fn found(host: &cpal::Host) -> (Listing, Vec<Found>) {
+    let listing = match format!("{:?}", host.id()).as_str() {
+        "PulseAudio" | "PipeWire" => Listing::Server,
+        "Alsa" => Listing::Alsa,
+        _ => Listing::Plain,
     };
-    let found: Vec<(String, Option<String>)> = devices
-        .filter_map(|device| device.description().ok())
-        .filter(cpal::DeviceDescription::supports_input)
-        .map(|description| {
-            (
-                description.name().to_string(),
-                description.driver().map(str::to_string),
-            )
-        })
-        .collect();
-    pick(&found, cfg!(target_os = "linux"))
+    let devices = host.input_devices().map_or_else(
+        |_| Vec::new(),
+        |devices| {
+            devices
+                .filter_map(|device| {
+                    let description = device.description().ok()?;
+                    description.supports_input().then(|| Found {
+                        id: device
+                            .id()
+                            .map(|id| id.id().to_string())
+                            .unwrap_or_default(),
+                        name: description.name().to_string(),
+                        driver: description.driver().map(str::to_string),
+                    })
+                })
+                .collect()
+        },
+    );
+    (listing, devices)
+}
+
+/// 这台电脑上能选的麦克风，照系统列的先后：（存进配置的值，给人看的名字）（配置页的下拉用，施工 VO-21、VO-22）。只列，不开
+/// 麦克风。
+#[must_use]
+pub fn listed() -> Vec<(String, String)> {
+    let (listing, devices) = found(&cpal::default_host());
+    pick(&devices, listing)
+}
+
+/// 从系统列的设备里挑出给人选的，重的只留一个。
+///
+/// - 声音服务（施工 VO-22，项目主人 2026-11-11：「可以走 pipewire，如果有的话」）：一个来源一项，不要「监听某个输出」的那种
+///   （`….monitor`，录的是电脑自己放的声音）；值是来源的编号（不随界面语言变），名字是系统声音设置里的那个。
+/// - ALSA：重采样、空设备这类插件、同一块声卡的几种开法都列成设备，只留每块声卡的 `sysdefault:CARD=…` 那一项；值和名字都是
+///   声卡的名字。
+/// - 别的系统列的本来就是一个个设备，全留；值和名字都是设备名。
+fn pick(found: &[Found], listing: Listing) -> Vec<(String, String)> {
+    let mut picked: Vec<(String, String)> = Vec::new();
+    for device in found {
+        let (wanted, value) = match listing {
+            Listing::Server => (!device.id.ends_with(".monitor"), &device.id),
+            Listing::Alsa => (
+                device
+                    .driver
+                    .as_deref()
+                    .is_some_and(|driver| driver.starts_with("sysdefault:CARD=")),
+                &device.name,
+            ),
+            Listing::Plain => (true, &device.name),
+        };
+        if wanted && !value.is_empty() && !picked.iter().any(|(seen, _)| seen == value) {
+            picked.push((value.clone(), device.name.clone()));
+        }
+    }
+    picked
 }
 
 /// 配置页麦克风下拉的选项（核心 SG-2 的 `choices_from`：回 `{"choices": [{"value", "name"}]}`）：头一项是空值「系统默认」，
-/// 后面是 [`names`]。`language` 是界面语言。
+/// 后面是 [`listed`]。`language` 是界面语言。
 #[must_use]
 pub fn choices(language: &str) -> serde_json::Value {
     let default = match language {
@@ -37,26 +102,11 @@ pub fn choices(language: &str) -> serde_json::Value {
     };
     let mut choices = vec![serde_json::json!({"value": "", "name": default})];
     choices.extend(
-        names()
+        listed()
             .into_iter()
-            .map(|name| serde_json::json!({"value": name, "name": name})),
+            .map(|(value, name)| serde_json::json!({"value": value, "name": name})),
     );
     serde_json::json!({"choices": choices})
-}
-
-/// 从系统列的设备（名字、驱动）里挑出给人选的。`alsa`（Linux）：ALSA 把重采样、空设备这类插件、同一块声卡的几种开法都列成
-/// 设备，只留每块声卡的 `sysdefault:CARD=…` 那一项（带转换、名字是声卡的名字）；别的系统列的本来就是一个个设备，全留。
-fn pick(found: &[(String, Option<String>)], alsa: bool) -> Vec<String> {
-    let mut names: Vec<String> = Vec::new();
-    for (name, driver) in found {
-        let card = driver
-            .as_deref()
-            .is_some_and(|driver| driver.starts_with("sysdefault:CARD="));
-        if (card || !alsa) && !name.is_empty() && !names.contains(name) {
-            names.push(name.clone());
-        }
-    }
-    names
 }
 
 /// 开着的麦克风：丢掉就关。
@@ -77,11 +127,13 @@ impl Mic {
     /// 找不到麦克风、打不开、样本格式不认识。
     pub fn open(device: Option<&str>) -> Result<Mic, String> {
         let host = cpal::default_host();
-        let chosen = device.and_then(|name| {
+        // 配置里存的是下拉给的值：声音服务的来源编号，或者设备名（ALSA、别的系统，和以前手填的）。
+        let chosen = device.and_then(|wanted| {
             host.input_devices().ok()?.find(|found| {
-                found
-                    .description()
-                    .is_ok_and(|description| description.name() == name)
+                found.id().is_ok_and(|id| id.id() == wanted)
+                    || found
+                        .description()
+                        .is_ok_and(|description| description.name() == wanted)
             })
         });
         let input = chosen

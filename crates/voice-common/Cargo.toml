@@ -14,7 +14,7 @@ mic = ["dep:cpal"]
 speaker = ["dep:rodio"]
 
 [dependencies]
-cpal = { version = "0.18.2", optional = true }
+cpal = { version = "0.18.2", optional = true, features = ["pulseaudio"] }
 rodio = { version = "0.23.0", default-features = false, features = ["playback", "mp3", "wav"], optional = true }
 # wav 的读写（纯 Rust）：stt.transcribe 收 wav（设计 20 第三节「形状」）。
 hound = "3.5.1"
