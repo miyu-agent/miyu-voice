@@ -44,6 +44,8 @@ description = { en = "zh: Mandarin, yue: Cantonese. auto guesses, and sometimes 
 [settings.microphone]
 type = "text"
 max = 200
+# 配置页画成下拉：选项问这个包的 microphones 方法（核心 SG-2；调不到的头退回文字框）。
+choices_from = "microphones"
 layers = ["system"]
 applies = "now"
 name = { en = "Microphone", zh = "麦克风", ja = "マイク" }

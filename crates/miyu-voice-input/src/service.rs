@@ -82,7 +82,7 @@ impl Service {
             .clone()
     }
 
-    /// 登记三个方法（先不登记，模型下好了 `enable_methods`）。
+    /// 登记 `stt.*` 三个方法（先不登记，模型下好了 `enable_methods`）和配置页用的 `microphones`。
     pub fn register(self: &Arc<Service>, ext: &mut Extension) {
         let service = Arc::clone(self);
         ext.method_with(
@@ -94,6 +94,11 @@ impl Service {
             Method::new("stt.record").timeout_ms(310_000).later(),
             move |params, _, core| service.record(params, core),
         );
+        // 配置页麦克风下拉的选项（施工 VO-21）：不上总线、不等模型，装着就答。
+        ext.method_with(Method::new("microphones"), move |params, _, core| {
+            only(params, &[])?;
+            Ok(voice_common::mic::choices(&core.language()))
+        });
         let service = Arc::clone(self);
         ext.method_with(
             Method::new("stt.stop").timeout_ms(5_000).later(),

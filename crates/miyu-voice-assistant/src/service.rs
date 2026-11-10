@@ -120,6 +120,10 @@ impl Service {
         ext.method_with(Method::new("listen"), move |params, _, core| {
             service.switch(params, core)
         });
+        // 配置页麦克风下拉的选项（施工 VO-21）。
+        ext.method_with(Method::new("microphones"), |_, _, core| {
+            Ok(voice_common::mic::choices(&core.language()))
+        });
         // 会话推来的事件（订阅了 events 流）：她的回答一句句念。
         let service = Arc::clone(self);
         ext.on("event", move |params, _| {

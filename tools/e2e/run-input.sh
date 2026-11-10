@@ -27,6 +27,8 @@ python3 -I $V/tools/e2e/head.py $MIYU_HOME \
   'bus.call {"name": "stt", "method": "transcribe", "params": {"audio": "$blob", "language": "xx"}}' \
   'bus.call {"name": "stt", "method": "transcribe", "params": {"audio": "sha256:0000000000000000000000000000000000000000000000000000000000000000"}}' \
   'bus.call {"name": "stt", "method": "stop"}' 2>&1 | sed 's/^/2. /'
+echo "2a. settings page microphone choices (VO-21):"; python3 -I $V/tools/e2e/head.py $MIYU_HOME 'package.call {"package": "miyu-voice-input", "method": "microphones"}' 2>&1 | cut -c1-300 | sed "s/^/    /"
+echo "    schema says: $(HEAD_FULL=1 python3 -I $V/tools/e2e/head.py $MIYU_HOME 'config.schema {}' 2>&1 | grep -o '"choices_from": {[^}]*}' | head -1)"
 echo "2b. same connection, long transcribe then stop:"; python3 -I $V/tools/e2e/pipelined.py $MIYU_HOME $S/long.wav | sed "s/^/    /"
 P=$(pid_of serve | head -1)
 echo "3. main resident after recognizing: $(grep VmRSS /proc/$P/status)"

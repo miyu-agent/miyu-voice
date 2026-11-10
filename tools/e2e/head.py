@@ -1,6 +1,6 @@
 # 当本机的头连核心（docs/reference/connection.md），照命令行参数发一串请求，一行印一个回应。
 #   python3 -I head.py <数据根> '<方法> <JSON 参数>' …
-import json, socket, sys
+import json, os, socket, sys
 
 home = sys.argv[1]
 path = open(f"{home}/run/socket").read().strip()
@@ -34,4 +34,5 @@ for arg in sys.argv[2:]:
     if method == "blob.put" and "result" in reply:
         last_blob = reply["result"]["blob"]
     out = reply.get("result", reply.get("error"))
-    print(method, json.dumps(out, ensure_ascii=False)[:300])
+    # HEAD_FULL=1：不截断（查 config.schema 这类长的）。
+    print(method, json.dumps(out, ensure_ascii=False)[: None if os.environ.get("HEAD_FULL") else 300])
