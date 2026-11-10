@@ -21,8 +21,8 @@ pub enum PlayError {
 /// 队列空了以后音箱再开多久：下一句在这之内来的接着放，不重开。
 pub const LINGER: Duration = Duration::from_millis(1500);
 
-/// 本机的音箱。
-#[derive(Default)]
+/// 本机的音箱。复制出去的是同一个（同一个队列）。
+#[derive(Default, Clone)]
 pub struct Speaker {
     inner: Arc<Inner>,
 }

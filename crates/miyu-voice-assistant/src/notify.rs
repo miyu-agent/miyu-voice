@@ -28,7 +28,7 @@ pub enum Notice {
     Listening,
     /// `miyu listen` 开了对话。
     ConversationOn,
-    /// 关了对话。
+    /// 对话结束了：`miyu listen` 关的，或者叫醒了一直没开口、她答完 30 秒没再说。
     ConversationOff,
     /// 认成了这句、交给她了：在想。
     Heard(String),
@@ -145,9 +145,9 @@ pub fn text(notice: &Notice, language: &str, name: &str) -> (String, String) {
         Notice::ConversationOn => (
             pick("对话开着", "会話中", "Conversation on"),
             pick(
-                "直接说，不用叫她；miyu listen 关掉",
-                "そのまま話してください。miyu listen で終了",
-                "Just talk, no wake word; miyu listen to end it",
+                "直接说；30 秒不说话就结束，miyu listen 也能关",
+                "そのまま話してください。30 秒黙ると終了、miyu listen でも終了",
+                "Just talk; it ends after 30 s of quiet, or miyu listen ends it",
             ),
         ),
         Notice::ConversationOff => (

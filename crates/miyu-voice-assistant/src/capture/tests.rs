@@ -14,10 +14,10 @@ fn the_microphone_is_wanted_unless_she_speaks_without_headphones() {
         switches.wanted(),
         "full duplex: keep listening to hear a cut-in"
     );
-    switches.held.store(true, Ordering::SeqCst);
+    switches.wake.store(true, Ordering::SeqCst);
     switches.full_duplex.store(false, Ordering::SeqCst);
     assert!(
         !switches.wanted(),
-        "an open conversation still waits until she stops"
+        "a conversation started by miyu listen still waits until she stops"
     );
 }

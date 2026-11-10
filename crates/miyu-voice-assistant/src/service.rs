@@ -3,7 +3,8 @@
 //! 接着说不用再叫她。
 //!
 //! 包装着、没停用就一直听唤醒词（项目主人 2026-11-10 定）：不想让它听的，在软件包里把它停用。`miyu listen` 开关的是对话：
-//! 开了响一声，说什么都交给她、不用唤醒词、不计时，直到再关；关了响另一声，她还在想、在说的打断，回到只等唤醒词。
+//! 开了同喊了唤醒词，响一声、等 30 秒你开口；关了响另一声，她还在想、在说的打断，回到只等唤醒词。对话自己也会结束：
+//! 叫醒了一直没开口、她答完 30 秒没再说，响结束那一声、弹一条「对话结束」（施工 VO-18，主人：「什么时候off啊？」）。
 
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -24,8 +25,10 @@ use crate::models::Models;
 use crate::notify::{Notice, Notifier, Step};
 use crate::reply::Reply;
 
-/// 唤醒以后等下一句多久（只说了唤醒词的）：这么久还没开口就不等了，开了口的等这一句说完。
+/// 喊了唤醒词以后等下一句多久（只说了唤醒词的）：这么久还没开口就不等了，开了口的等这一句说完。
 const AWAIT: Duration = Duration::from_secs(8);
+/// `miyu listen` 开了对话以后等多久：同她答完以后的追问窗口（敲完命令、按完热键要一会儿才开口）。
+const AWAIT_COMMAND: Duration = crate::conversation::FOLLOW_UP;
 /// 默认的唤醒词（设计 20 第九节：Miyu 的名字的几种念法）。
 pub const DEFAULT_WAKE_WORDS: [&str; 4] = ["未有未有", "密友密友", "miyumiyu", "みゆみゆ"];
 
@@ -173,7 +176,9 @@ impl Service {
         let barge_core = core.clone();
         let microphone = Some(settings.microphone.clone()).filter(|name| !name.is_empty());
         std::thread::spawn(move || {
-            let mut awaiting = None::<Instant>;
+            // 等下一句：从什么时候起、等多久。
+            let mut awaiting = None::<(Instant, Duration)>;
+            let mut was_open = false;
             capture::run(
                 microphone.as_deref(),
                 &service.switches,
@@ -192,33 +197,42 @@ impl Service {
                         return;
                     };
                     let switches = &service.switches;
+                    if switches.wake.swap(false, Ordering::SeqCst) {
+                        awaiting = Some((Instant::now(), AWAIT_COMMAND));
+                    }
                     if switches.ended.swap(false, Ordering::SeqCst)
-                        || awaiting.is_some_and(|since| since.elapsed() > AWAIT)
+                        || awaiting.is_some_and(|(since, wait)| since.elapsed() > wait)
                             && !listener.hearing()
                     {
                         awaiting = None;
                     }
-                    // 窗口：`miyu listen` 开着的对话，唤醒以后等下一句的 8 秒，她在想、在说，念完以后的追问窗口。
+                    // 窗口：叫醒以后等下一句，她在想、在说，念完以后的追问窗口。
                     let follow_up = service
                         .conversation()
                         .is_some_and(|conversation| conversation.window_open());
-                    let open =
-                        switches.held.load(Ordering::SeqCst) || awaiting.is_some() || follow_up;
+                    let open = awaiting.is_some() || follow_up;
                     switches.open.store(open, Ordering::SeqCst);
                     listener.set_window(open);
+                    // 对话自己结束了（`miyu listen off` 关的那边已经响过、说过）。
+                    if was_open && !open && !switches.silenced.swap(false, Ordering::SeqCst) {
+                        chime::play(&service.speaker, Chime::Off);
+                        service.notifier.show(Notice::ConversationOff);
+                    }
+                    was_open = open;
                     for event in listener.feed(frame) {
                         match event {
                             Event::Wake { rest, .. } => {
                                 woken(&barge_core, &service.speaker);
                                 service.notifier.show(Notice::Listening);
-                                if rest.is_empty() {
-                                    awaiting = Some(Instant::now());
-                                } else {
+                                // 唤醒词后面紧跟着说了的，照样留一段窗口，等认字、交给她、她开始答。
+                                awaiting = Some((Instant::now(), AWAIT));
+                                if !rest.is_empty() {
                                     let _ = utterances.send(rest);
                                 }
                             }
+                            // 一句：交去认字。窗口再留一会儿，认字、交给她这段不关；没听清的这会儿里再说一次就行。
                             Event::Speech(audio) => {
-                                awaiting = None;
+                                awaiting = Some((Instant::now(), AWAIT));
                                 let _ = utterances.send(audio);
                             }
                             // 她正念着、你开口了（只有全双工收得到）：打断。打断要等核心回，另开线程，不耽误收麦。
@@ -324,11 +338,11 @@ fn understand(core: &Core, audio: &[f32]) -> Result<Option<String>, String> {
 }
 
 impl Service {
-    /// `listen {to: on|off|toggle}`（`miyu listen`、绑它的热键）：开、关对话，交回现在开没开。现在开没开算上喊了唤醒词的
-    /// 那一段：在追问窗口里切一下是关。开了响叫醒那一声；关了响另一声，收掉窗口，她还在想、在说的打断这一轮。
+    /// `listen {to: on|off|toggle}`（`miyu listen`、绑它的热键）：开、关对话，交回现在开没开。开了同喊了唤醒词（响一声，
+    /// 等 30 秒你开口）；在对话里（喊唤醒词叫来的也算）切一下是关：响另一声，收掉窗口，她还在想、在说的打断这一轮。
     fn switch(&self, params: &Value, core: &Core) -> Result<Value, MethodError> {
         let switches = &self.switches;
-        let now = switches.held.load(Ordering::SeqCst) || switches.open.load(Ordering::SeqCst);
+        let now = switches.open.load(Ordering::SeqCst);
         let on = match params["to"].as_str() {
             None | Some("toggle") => !now,
             Some("on") => true,
@@ -340,27 +354,21 @@ impl Service {
                 ));
             }
         };
-        let held = switches.held.swap(on, Ordering::SeqCst);
-        if on {
+        if on && !now {
+            switches.wake.store(true, Ordering::SeqCst);
             switches.open.store(true, Ordering::SeqCst);
-            if !now {
-                woken(core, &self.speaker);
-            }
-            // 喊唤醒词叫来的那段里开：变成一直开着的对话，也说一声；已经开着的不再说。
-            if !held {
-                self.notifier.show(Notice::ConversationOn);
-            }
-        } else {
+            woken(core, &self.speaker);
+            self.notifier.show(Notice::ConversationOn);
+        } else if !on && now {
+            switches.silenced.store(true, Ordering::SeqCst);
             switches.ended.store(true, Ordering::SeqCst);
             switches.open.store(false, Ordering::SeqCst);
             if let Some(conversation) = self.conversation() {
                 let core = core.clone();
                 std::thread::spawn(move || conversation.close(&core));
             }
-            if now {
-                chime::play(&self.speaker, Chime::Off);
-                self.notifier.show(Notice::ConversationOff);
-            }
+            chime::play(&self.speaker, Chime::Off);
+            self.notifier.show(Notice::ConversationOff);
         }
         Ok(json!({"listening": on}))
     }
