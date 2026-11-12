@@ -4,13 +4,13 @@ Miyu 的三个语音包，都是可选的：没装就没有，任何界面上都
 
 | 包 | 装上以后 | 命令 |
 |---|---|---|
-| `miyu-voice-input` | 在这台电脑上把说的话转成字（SenseVoice，CPU 就够）：终端、网页输入框的麦克风，聊天里的语音消息转成字 | `miyu voice-input` |
-| `miyu-say` | 用云端的声音（MiniMax、MiMo、OpenAI 兼容）把回复念出来；她能说话、能发语音 | `miyu say` |
-| `miyu-voice-assistant` | 像 Siri 那样常驻后台，叫她的名字就能说；装它会带上另外两个 | `miyu listen` |
+| `voice-input` | 在这台电脑上把说的话转成字（SenseVoice，CPU 就够）：终端、网页输入框的麦克风，聊天里的语音消息转成字 | `miyu voice-input` |
+| `say` | 用云端的声音（MiniMax、MiMo、OpenAI 兼容）把回复念出来；她能说话、能发语音 | `miyu say` |
+| `voice-assistant` | 像 Siri 那样常驻后台，叫她的名字就能说；装它会带上另外两个 | `miyu listen` |
 
 ```sh
-miyu pkg install miyu-voice-assistant   # 全套
-miyu pkg install miyu-voice-input       # 只要语音转字
+miyu pkg install voice-assistant   # 全套
+miyu pkg install voice-input       # 只要语音转字
 ```
 
 语音助手装着、没停用，核心开着就一直听唤醒词（默认「未有未有」「密友密友」「miyumiyu」「みゆみゆ」，配置页能改，`miyu listen wake-test <词>` 先试）；不想让它听就在软件包里停用它。`miyu listen` 开关和她的对话（`miyu listen on`、`off` 写明）：开了同喊了唤醒词，响一声就说；关了响另一声，她还在说的停下。对话也会自己结束：叫醒了 30 秒没开口、她说完 30 秒没再说，响结束那一声、弹一条「对话结束」；这之前接着说不用再叫。一路弹系统通知：在听、认成了什么、在想、她说到哪、没听清、哪一步出了错（Linux 上一直是同一条跟着变；Windows、macOS 换不掉上一条，只弹认成了什么、答完、出错）。她说话时你一开口她就停，外放也行：助手把音箱正在放的声音从麦克风收到的里面减掉（回声消除），不把她自己的声音当成你说的；音箱开得比你的声音响很多时听不出你开口，这时喊不动她，等她说完或者 `miyu listen off`。不想被打断的在配置页关掉「说话时可以打断她」，她说完才听你的。快捷键：Windows、macOS 由托盘程序注册；Linux 的 Wayland 不让程序自己抢全局键，在桌面环境的快捷键设置里绑一条 `miyu listen`。

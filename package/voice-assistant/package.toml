@@ -9,7 +9,7 @@ name = { en = "Voice assistant", zh = "语音助手", ja = "音声アシスタ�
 summary = { en = "Runs in the background: say her name and talk", zh = "常驻后台：叫她的名字就能说话", ja = "バックグラウンドで待機：名前を呼べば話せます" }
 upstream = "https://github.com/miyu-agent/miyu-voice"
 icon = "audio-lines"
-# 配置键是 voice-assistant.*（不写是包的编号，太长；程序照这个前缀读）。
+# 配置键是 voice-assistant.*（同包编号，写明了不随编号变；程序照这个前缀读）。
 prefix = "voice-assistant"
 
 # miyu listen：开关和她的对话，miyu listen on、off 写明（项目主人 2026-11-10 定：装着、没停用就一直听唤醒词，开关管的是对话）。
@@ -31,7 +31,7 @@ capabilities = ["audio.record", "audio.play", "packages.call", "act_for_external
 platform = "voice"
 
 [depends]
-packages = ["miyu-voice-input", "miyu-say"]
+packages = ["voice-input", "say"]
 
 # 配置页（设计 20 第九节「配置页」）：唤醒词、灵敏度、麦克风。键是 voice-assistant.*。
 

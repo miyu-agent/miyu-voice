@@ -9,7 +9,7 @@ name = { en = "Say", zh = "朗读", ja = "読み上げ" }
 summary = { en = "Reads replies aloud with a cloud voice; she can speak and send voice messages", zh = "用云端的声音把回复念出来；她能说话、能发语音", ja = "クラウドの声で返信を読み上げます。AI が話したり音声メッセージを送ったりできます" }
 upstream = "https://github.com/miyu-agent/miyu-voice"
 icon = "volume-2"
-# 配置键是 say.*（不写是 miyu-say.*，太长）。
+# 配置键是 say.*（同包编号，写明了不随编号变）。
 prefix = "say"
 
 # miyu say <文字>：用当前人格的声音从本机音箱念；-o 存成文件；--file 放一个现成的音频（设计 20 第六节）。

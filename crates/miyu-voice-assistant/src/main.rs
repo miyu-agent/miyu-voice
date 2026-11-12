@@ -73,7 +73,7 @@ fn switch(to: &str) -> Result<(), String> {
     let mut core = voice_common::client::Client::connect(&home, "miyu-listen")?;
     let answer = core.call(
         "package.call",
-        &serde_json::json!({"package": "miyu-voice-assistant", "method": "listen", "params": {"to": to}}),
+        &serde_json::json!({"package": "voice-assistant", "method": "listen", "params": {"to": to}}),
     )?;
     println!(
         "{}",

@@ -4,7 +4,7 @@
 
 1. **只走协议**：三个包都是第三方写法的软件包，照核心仓库 `docs/authors/README.md` 能拿到的东西做，收发用开发包 `miyu-ext`（`miyu-agent/miyu-sdk`）；缺什么补进核心或开发包，不给这几个包开后门，也不依赖核心的 crate。
 2. **设计在核心仓库**：`docs/designs/20-语音.md`（三个包、总线上的名字和每个方法的形状），`docs/designs/67-总线.md`（`provides`、`plugs`、`bus.call`）。这里的 `docs/` 只放施工单和登记簿。
-3. **包之间只照名字调**：`miyu-voice-assistant` 调 `stt`、`tts`，不写 `miyu-voice-input`、`miyu-say` 的包名；社区引擎照 `stt.engine`、`tts.engine` 接。头和 IM 也只认名字。
+3. **包之间只照名字调**：`voice-assistant` 调 `stt`、`tts`，不写 `voice-input`、`say` 的包名；社区引擎照 `stt.engine`、`tts.engine` 接。头和 IM 也只认名字。
 4. **给模型看的字**（`say` 工具的说明、参数、结果）写英文短句，一件工具最多三句；每一处都记进 `docs/prompt-ledger.md`。给人看的字（清单里的名字、配置项）三种语言。
 5. **sherpa-onnx 的库**：先跑 `tools/sherpa-lib.sh`（Windows 没有 bash 的跑 `tools/sherpa-lib.ps1`），照 `tools/sherpa-onnx.lock` 钉死的 SHA-256 下好、校验；`.cargo/config.toml` 一直指着那里，没跑的编不过，不让 sherpa-onnx-sys 自己下。运行时下的识别模型同样钉 SHA-256（`crates/miyu-voice-input/src/model.rs`）。
 6. **三个平台**：Linux、macOS（M 系列）、Windows 都要能编、能跑；CI 三台。测试不靠跑测试的机器有麦克风、音箱、网络：录音、放音、云端合成都隔在一层后面，测试换成假的。

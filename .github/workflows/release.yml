@@ -25,8 +25,8 @@ jobs:
     permissions:
       contents: write
     with:
-      package: miyu-voice-input
-      folder: dist/miyu-voice-input
+      package: voice-input
+      folder: dist/voice-input
       target: ${{ matrix.target }}
       runs-on: ${{ matrix.os }}
       build: |
@@ -37,12 +37,12 @@ jobs:
         cargo build --release --locked -p miyu-voice-input --bin miyu-voice-input
         exe=""
         if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
-        rm -rf dist/miyu-voice-input && mkdir -p dist/miyu-voice-input/bin
-        cp package/miyu-voice-input/package.toml dist/miyu-voice-input/
-        cp "target/release/miyu-voice-input$exe" dist/miyu-voice-input/bin/
-        cp LICENSE THIRD-PARTY-LICENSES.txt dist/miyu-voice-input/
+        rm -rf dist/voice-input && mkdir -p dist/voice-input/bin
+        cp package/voice-input/package.toml dist/voice-input/
+        cp "target/release/miyu-voice-input$exe" dist/voice-input/bin/
+        cp LICENSE THIRD-PARTY-LICENSES.txt dist/voice-input/
         for need in package.toml THIRD-PARTY-LICENSES.txt "bin/miyu-voice-input$exe" LICENSE; do
-          [ -f "dist/miyu-voice-input/$need" ] || { echo "包里少了 miyu-voice-input/$need"; exit 1; }
+          [ -f "dist/voice-input/$need" ] || { echo "包里少了 voice-input/$need"; exit 1; }
         done
 
   # 包里：清单、bin/miyu-say。
@@ -61,8 +61,8 @@ jobs:
     permissions:
       contents: write
     with:
-      package: miyu-say
-      folder: dist/miyu-say
+      package: say
+      folder: dist/say
       target: ${{ matrix.target }}
       runs-on: ${{ matrix.os }}
       build: |
@@ -73,12 +73,12 @@ jobs:
         cargo build --release --locked -p miyu-say --bin miyu-say
         exe=""
         if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
-        rm -rf dist/miyu-say && mkdir -p dist/miyu-say/bin
-        cp package/miyu-say/package.toml dist/miyu-say/
-        cp "target/release/miyu-say$exe" dist/miyu-say/bin/
-        cp LICENSE THIRD-PARTY-LICENSES.txt dist/miyu-say/
+        rm -rf dist/say && mkdir -p dist/say/bin
+        cp package/say/package.toml dist/say/
+        cp "target/release/miyu-say$exe" dist/say/bin/
+        cp LICENSE THIRD-PARTY-LICENSES.txt dist/say/
         for need in package.toml THIRD-PARTY-LICENSES.txt "bin/miyu-say$exe" LICENSE; do
-          [ -f "dist/miyu-say/$need" ] || { echo "包里少了 miyu-say/$need"; exit 1; }
+          [ -f "dist/say/$need" ] || { echo "包里少了 say/$need"; exit 1; }
         done
 
   # 包里：清单、bin/miyu-voice-assistant。唤醒词、人声检测的模型第一次启动时下载（施工 VO-11 定）。
@@ -97,8 +97,8 @@ jobs:
     permissions:
       contents: write
     with:
-      package: miyu-voice-assistant
-      folder: dist/miyu-voice-assistant
+      package: voice-assistant
+      folder: dist/voice-assistant
       target: ${{ matrix.target }}
       runs-on: ${{ matrix.os }}
       build: |
@@ -109,10 +109,10 @@ jobs:
         cargo build --release --locked -p miyu-voice-assistant --bin miyu-voice-assistant
         exe=""
         if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
-        rm -rf dist/miyu-voice-assistant && mkdir -p dist/miyu-voice-assistant/bin
-        cp package/miyu-voice-assistant/package.toml dist/miyu-voice-assistant/
-        cp "target/release/miyu-voice-assistant$exe" dist/miyu-voice-assistant/bin/
-        cp LICENSE THIRD-PARTY-LICENSES.txt dist/miyu-voice-assistant/
+        rm -rf dist/voice-assistant && mkdir -p dist/voice-assistant/bin
+        cp package/voice-assistant/package.toml dist/voice-assistant/
+        cp "target/release/miyu-voice-assistant$exe" dist/voice-assistant/bin/
+        cp LICENSE THIRD-PARTY-LICENSES.txt dist/voice-assistant/
         for need in package.toml THIRD-PARTY-LICENSES.txt "bin/miyu-voice-assistant$exe" LICENSE; do
-          [ -f "dist/miyu-voice-assistant/$need" ] || { echo "包里少了 miyu-voice-assistant/$need"; exit 1; }
+          [ -f "dist/voice-assistant/$need" ] || { echo "包里少了 voice-assistant/$need"; exit 1; }
         done

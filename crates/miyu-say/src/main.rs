@@ -92,7 +92,7 @@ fn command(args: &[String]) -> Result<(), String> {
     if args.iter().any(|arg| arg == "--voices") {
         let answer = core.call(
             "package.call",
-            &json!({"package": "miyu-say", "method": "voices"}),
+            &json!({"package": "say", "method": "voices"}),
         )?;
         for voice in answer["voices"].as_array().into_iter().flatten() {
             println!(
