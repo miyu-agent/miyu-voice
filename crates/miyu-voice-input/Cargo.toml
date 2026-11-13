@@ -20,7 +20,7 @@ sherpa-onnx = "=2.0.1"
 base64 = "0.22"
 miyu-ext.workspace = true
 serde_json.workspace = true
-voice-common = { workspace = true, features = ["mic"] }
+voice-common = { workspace = true, features = ["mic", "speaker"] }
 
 [lints]
 workspace = true

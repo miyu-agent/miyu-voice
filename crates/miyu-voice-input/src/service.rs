@@ -9,6 +9,7 @@ use miyu_ext::{Core, Extension, Method, MethodError};
 use serde_json::{Map, Value, json};
 use voice_common::audio::{self, Pcm};
 use voice_common::blobs;
+use voice_common::speaker::Speaker;
 
 use crate::filter;
 use crate::recognize::{Heard, LANGUAGES, Refused};
@@ -19,7 +20,7 @@ use crate::worker::Workers;
 pub const METHODS: [&str; 3] = ["stt.transcribe", "stt.record", "stt.stop"];
 
 /// 包的配置（清单里的 `voice-input.*`）。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     /// 默认的识别语言。
     pub language: String,
@@ -27,6 +28,8 @@ pub struct Settings {
     pub microphone: String,
     /// 社区 `stt.engine` 的包编号；空的用自带的 SenseVoice。
     pub engine: String,
+    /// 开始听、停止听时响提示音（`voice-input.chime`，出厂开着，施工 VO-25）。
+    pub chime: bool,
 }
 
 impl Settings {
@@ -45,6 +48,10 @@ impl Settings {
             language: text("voice-input.language", "zh"),
             microphone: text("voice-input.microphone", ""),
             engine: text("voice-input.engine", ""),
+            chime: config
+                .get("voice-input.chime")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
         }
     }
 }
@@ -54,6 +61,8 @@ pub struct Service {
     settings: RwLock<Settings>,
     workers: Workers,
     stopper: Stopper,
+    /// 提示音从这放。
+    speaker: Speaker,
 }
 
 impl Service {
@@ -61,9 +70,10 @@ impl Service {
     #[must_use]
     pub fn new(cache: PathBuf) -> Arc<Service> {
         Arc::new(Service {
-            settings: RwLock::new(Settings::default()),
+            settings: RwLock::new(Settings::from_config(&Map::new())),
             workers: Workers::new(cache),
             stopper: Stopper::default(),
+            speaker: Speaker::default(),
         })
     }
 
@@ -136,15 +146,19 @@ impl Service {
         let silence_ms = number(params, "silence_ms", 1_200, 300, 5_000)?;
         let settings = self.settings();
         let microphone = Some(settings.microphone.as_str()).filter(|name| !name.is_empty());
-        let (pcm, ended) =
-            record::record(microphone, silence_ms, max_ms, &self.stopper).map_err(|error| {
-                match error {
-                    RecordError::MicBusy => {
-                        MethodError::new("mic_busy", "Another dictation is using the microphone.")
-                    }
-                    RecordError::NoMicrophone(why) => MethodError::new("no_microphone", why),
-                }
-            })?;
+        let (pcm, ended) = record::record(
+            microphone,
+            silence_ms,
+            max_ms,
+            &self.stopper,
+            settings.chime.then_some(&self.speaker),
+        )
+        .map_err(|error| match error {
+            RecordError::MicBusy => {
+                MethodError::new("mic_busy", "Another dictation is using the microphone.")
+            }
+            RecordError::NoMicrophone(why) => MethodError::new("no_microphone", why),
+        })?;
         Ok(answer(
             &self.recognize(core, &pcm, &language)?,
             Some(ended.as_str()),

@@ -2,10 +2,9 @@
 //!
 //! 核心照清单 `[process] args` 带 `serve` 拉起（[`service`]）；人敲 `miyu listen …` 时核心把后面的参数原样交过来：命令当
 //! 本机的头连核心，调在跑的助手的 `listen`，开、关和她的对话（唤醒词装着就一直在听，不归它管）。唤醒词、人声检测的模型（[`models`]），唤醒词编成唤醒模型认的写法
-//! （[`keywords`]），听（[`listen`]），收麦（[`capture`]），提示音（[`chime`]）；会话那一段等核心 VA-1。
+//! （[`keywords`]），听（[`listen`]），收麦（[`capture`]），提示音（`voice_common::chime`）；会话那一段等核心 VA-1。
 
 mod capture;
-mod chime;
 mod conversation;
 mod echo;
 mod keywords;

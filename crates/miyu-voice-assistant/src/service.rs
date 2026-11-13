@@ -17,13 +17,13 @@ use serde_json::{Map, Value, json};
 use voice_common::{audio, blobs, speaker::Speaker};
 
 use crate::capture::{self, Switches};
-use crate::chime::{self, Chime};
 use crate::conversation::Conversation;
 use crate::keywords;
 use crate::listen::{Event, Listener, RATE, Sensitivity};
 use crate::models::Models;
 use crate::notify::{Notice, Notifier, Step};
 use crate::reply::Reply;
+use voice_common::chime::{self, Chime};
 
 /// 喊了唤醒词以后等下一句多久（只说了唤醒词的）：这么久还没开口就不等了，开了口的等这一句说完。
 const AWAIT: Duration = Duration::from_secs(8);

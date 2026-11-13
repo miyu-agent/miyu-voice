@@ -8,6 +8,14 @@ fn settings_default_to_chinese_and_the_built_in_engine() {
     assert_eq!(settings.language, "zh");
     assert!(settings.engine.is_empty());
     assert!(settings.microphone.is_empty());
+    assert!(settings.chime, "chimes are on out of the box");
+}
+
+#[test]
+fn chimes_can_be_turned_off() {
+    let mut config = Map::new();
+    config.insert("voice-input.chime".to_string(), json!(false));
+    assert!(!Settings::from_config(&config).chime);
 }
 
 #[test]

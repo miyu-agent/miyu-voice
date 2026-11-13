@@ -22,8 +22,9 @@ about = { en = "Voice input: model and microphone status", zh = "语音输入：
 [process]
 args = ["serve"]
 start = "always"
-# audio.record：录本机麦克风（stt.record）；network：第一次启动下载识别模型；packages.call：调社区的 stt.engine。
-capabilities = ["audio.record", "network", "packages.call"]
+# audio.record：录本机麦克风（stt.record）；audio.play：开始、停止听的提示音；network：第一次启动下载识别模型；
+# packages.call：调社区的 stt.engine。
+capabilities = ["audio.record", "audio.play", "network", "packages.call"]
 
 # 总线（设计 67）：模型下好、校验过才登记这三个方法，头这时才画麦克风（设计 20 第五节）。
 [export]
@@ -50,6 +51,14 @@ layers = ["system"]
 applies = "now"
 name = { en = "Microphone", zh = "麦克风", ja = "マイク" }
 description = { en = "The device name. Empty: the system default.", zh = "设备名。不填用系统默认的。", ja = "デバイス名。空欄はシステムの既定。" }
+
+[settings.chime]
+type = "bool"
+default = true
+layers = ["system"]
+applies = "now"
+name = { en = "Voice input sounds", zh = "语音输入提示音", ja = "音声入力の効果音" }
+description = { en = "A rising tone when it starts listening, a falling one when it stops.", zh = "开始听时响一声上扬的，停止听时响一声下沉的。", ja = "聞き始めに上がる音、止めるときに下がる音を鳴らします。" }
 
 [settings.engine]
 type = "text"

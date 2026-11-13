@@ -55,7 +55,14 @@ fn record_once(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     };
     eprintln!("listening… (stops when you go quiet)");
-    match record::record(option(args, "--device"), 1200, 60_000, &Stopper::default()) {
+    let speaker = voice_common::speaker::Speaker::default();
+    match record::record(
+        option(args, "--device"),
+        1200,
+        60_000,
+        &Stopper::default(),
+        Some(&speaker),
+    ) {
         Ok((pcm, ended)) => recognize_and_print(cache, &pcm, language, Some(ended.as_str())),
         Err(why) => {
             eprintln!("{why:?}");

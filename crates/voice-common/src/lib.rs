@@ -4,6 +4,8 @@
 
 pub mod audio;
 pub mod blobs;
+#[cfg(feature = "speaker")]
+pub mod chime;
 pub mod client;
 pub mod download;
 #[cfg(feature = "mic")]

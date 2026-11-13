@@ -3,7 +3,7 @@ use super::{Chime, LEAD_MS, wav};
 #[test]
 fn chimes_are_audible_quiet_enough_and_differ() {
     for chime in [Chime::Wake, Chime::Off] {
-        let pcm = voice_common::audio::read_wav(&wav(chime)).unwrap();
+        let pcm = crate::audio::read_wav(&wav(chime)).unwrap();
         assert!(
             pcm.duration_ms() > 400 && pcm.duration_ms() < 800,
             "{chime:?}: {} ms",
