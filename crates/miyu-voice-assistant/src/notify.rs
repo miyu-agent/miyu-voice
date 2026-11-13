@@ -38,6 +38,8 @@ pub enum Notice {
     Reply { text: String, done: bool },
     /// 哪一步出了错、为什么。
     Trouble(Step, String),
+    /// 麦克风开着，可连着 30 秒一点声音都没有（施工 VO-26）。
+    SilentMicrophone,
 }
 
 /// 出错的那一步。
@@ -177,6 +179,18 @@ pub fn text(notice: &Notice, language: &str, name: &str) -> (String, String) {
                 }
             },
             tail(text, REPLY_CHARS),
+        ),
+        Notice::SilentMicrophone => (
+            pick(
+                "麦克风没有声音",
+                "マイクから音が来ません",
+                "The microphone is silent",
+            ),
+            pick(
+                "30 秒一点声音都没有：麦克风可能被静音、没插好，或者系统的默认输入没有声音",
+                "30 秒間まったく音がありません。マイクのミュート、接続、システムの既定の入力を確かめてください",
+                "No sound at all for 30 s: the microphone may be muted or unplugged, or the system's default input carries no sound",
+            ),
         ),
         Notice::Trouble(step, why) => {
             let title = match step {

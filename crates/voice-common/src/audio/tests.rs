@@ -40,3 +40,36 @@ fn not_a_wav_is_bad_audio() {
     let error = read_wav(b"OggS this is not a wav").unwrap_err();
     assert!(error.0.starts_with("Not a readable WAV file"), "{error}");
 }
+
+/// 数字静音（全零、只差一两个最低位）算静音；正常房间的底噪（比它大几十倍）和人声不算（施工 VO-26）。
+#[test]
+fn digital_silence_is_told_apart_from_a_quiet_room() {
+    use super::{SILENT_PEAK, silent, wav_silent};
+    let zeros = vec![0.0f32; 16_000];
+    let lsb: Vec<f32> = (0..16_000)
+        .map(|i| {
+            if i % 2 == 0 {
+                1.0 / 32768.0
+            } else {
+                -2.0 / 32768.0
+            }
+        })
+        .collect();
+    let room: Vec<f32> = (0..16_000u32)
+        .map(|i| (f32::from(u16::try_from(i * 7919 % 200).unwrap()) - 100.0) / 100.0 * 0.002)
+        .collect();
+    let mut one_word = zeros.clone();
+    one_word[8_000] = 0.3;
+    assert!(silent(&zeros) && silent(&lsb) && silent(&[]));
+    assert!(!silent(&room) && !silent(&one_word));
+    for (samples, expected) in [
+        (&zeros, true),
+        (&lsb, true),
+        (&room, false),
+        (&one_word, false),
+    ] {
+        assert_eq!(wav_silent(&write_wav(samples, 16_000)).unwrap(), expected);
+    }
+    const { assert!(SILENT_PEAK < 0.0001) };
+    assert!(wav_silent(b"not a wav").is_err());
+}

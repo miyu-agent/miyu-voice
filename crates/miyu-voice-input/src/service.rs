@@ -129,6 +129,9 @@ impl Service {
             if let Err(why) = audio::check_wav(&bytes) {
                 return Err(MethodError::new("bad_audio", why.0));
             }
+            if audio::wav_silent(&bytes).map_err(|why| MethodError::new("bad_audio", why.0))? {
+                return Err(silent_audio());
+            }
             let heard = self
                 .workers
                 .transcribe_wav(&bytes, &language)
@@ -136,6 +139,9 @@ impl Service {
             return Ok(answer(&heard, None));
         }
         let pcm = audio::read_wav(&bytes).map_err(|why| MethodError::new("bad_audio", why.0))?;
+        if audio::silent(&pcm.samples) {
+            return Err(silent_audio());
+        }
         Ok(answer(&self.recognize(core, &pcm, &language)?, None))
     }
 
@@ -159,6 +165,9 @@ impl Service {
             }
             RecordError::NoMicrophone(why) => MethodError::new("no_microphone", why),
         })?;
+        if audio::silent(&pcm.samples) {
+            return Err(silent_audio());
+        }
         Ok(answer(
             &self.recognize(core, &pcm, &language)?,
             Some(ended.as_str()),
@@ -223,6 +232,14 @@ fn answer(heard: &Heard, ended: Option<&str>) -> Value {
         answer["ended"] = ended.into();
     }
     answer
+}
+
+/// 整段是数字静音（施工 VO-26，核心 `reference/bus.md` 的 `silent_audio`）：多半是麦克风那头没声音，不是没说话。
+fn silent_audio() -> MethodError {
+    MethodError::new(
+        "silent_audio",
+        "The recording is digital silence: the microphone is muted, unplugged, or the system's default input carries no sound.",
+    )
 }
 
 fn refused(refused: Refused) -> MethodError {

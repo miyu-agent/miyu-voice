@@ -70,6 +70,46 @@ pub fn read_wav(bytes: &[u8]) -> Result<Pcm, BadAudio> {
     })
 }
 
+/// 数字静音的门槛：整段每个样本都不超过它（16 位里的 2）的，是麦克风被静音、没接上、系统默认输入没声音这类（施工 VO-26，
+/// `silent_audio`）；正常房间的底噪比它大得多。
+pub const SILENT_PEAK: f32 = 2.0 / 32768.0;
+
+/// 这一段是不是数字静音（空的也算）。
+#[must_use]
+pub fn silent(samples: &[f32]) -> bool {
+    samples.iter().all(|sample| sample.abs() <= SILENT_PEAK)
+}
+
+/// wav 的字节是不是数字静音：一个个样本看，不整段解进内存，有一个响的就停。
+///
+/// # Errors
+///
+/// 不是 wav、wav 坏了。
+pub fn wav_silent(bytes: &[u8]) -> Result<bool, BadAudio> {
+    let reader = hound::WavReader::new(Cursor::new(bytes))
+        .map_err(|error| BadAudio(format!("Not a readable WAV file: {error}.")))?;
+    let spec = reader.spec();
+    match spec.sample_format {
+        hound::SampleFormat::Float => {
+            for sample in reader.into_samples::<f32>() {
+                if sample.map_err(|error| broken(&error))?.abs() > SILENT_PEAK {
+                    return Ok(false);
+                }
+            }
+        }
+        hound::SampleFormat::Int => {
+            let scale = 2f32.powi(i32::from(spec.bits_per_sample) - 1);
+            for sample in reader.into_samples::<i32>() {
+                if (int_to_f32(sample.map_err(|error| broken(&error))?) / scale).abs() > SILENT_PEAK
+                {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    Ok(true)
+}
+
 /// 只看 wav 的头读不读得出来、不解样本：交给别的进程解之前先挡掉明显不是 wav 的（`bad_audio`）。
 ///
 /// # Errors

@@ -67,6 +67,8 @@ pub fn run(
     let mut frames = Frames {
         echo: Echo::new(switches.played.clone(), Arc::clone(&switches.mostly_echo)),
         pending: Vec::new(),
+        silence: Silence::default(),
+        notifier,
     };
     if let Some(path) = std::env::var_os("MIYU_VOICE_TEST_MIC") {
         play_file(
@@ -108,14 +110,20 @@ pub fn run(
     }
 }
 
-/// 收到的 16 kHz 的声音过回声消除、切成一帧帧。
-struct Frames {
+/// 收到的 16 kHz 的声音过回声消除、切成一帧帧；连着 [`SILENT_FOR`] 都是数字静音的说一次（[`Silence`]）。
+struct Frames<'a> {
     echo: Echo,
     pending: Vec<f32>,
+    silence: Silence,
+    notifier: &'a Notifier,
 }
 
-impl Frames {
+impl Frames<'_> {
     fn feed(&mut self, heard: &[f32], frame: &mut impl FnMut(&[f32])) {
+        if self.silence.heard(heard) {
+            eprintln!("miyu-voice-assistant: the microphone has been digitally silent for 30 s");
+            self.notifier.show(Notice::SilentMicrophone);
+        }
         self.pending.extend(self.echo.clean(heard));
         let whole = self.pending.len() / FRAME * FRAME;
         for piece in self.pending[..whole].chunks(FRAME) {
@@ -125,11 +133,36 @@ impl Frames {
     }
 }
 
+/// 连着多久都是数字静音才说（施工 VO-26）：正常的麦克风哪怕没人说话也有底噪，一直是零的是麦克风那头没声音。
+const SILENT_FOR: usize = RATE * 30;
+
+/// 数一数连着多少个样本是数字静音（[`voice_common::audio::silent`]）；到 [`SILENT_FOR`] 交回一次 `true`，有了声音重新数。
+#[derive(Debug, Default)]
+struct Silence {
+    run: usize,
+    said: bool,
+}
+
+impl Silence {
+    fn heard(&mut self, samples: &[f32]) -> bool {
+        if !voice_common::audio::silent(samples) {
+            (self.run, self.said) = (0, false);
+            return false;
+        }
+        self.run += samples.len();
+        if self.run >= SILENT_FOR && !self.said {
+            self.said = true;
+            return true;
+        }
+        false
+    }
+}
+
 /// 拿着麦的这一段：收、转、消回声、切帧，直到有人要麦、关了、她开口（关了「说话时可以打断她」的）、设备出错。
 fn listen_while_held(
     mic: &Mic,
     switches: &Switches,
-    frames: &mut Frames,
+    frames: &mut Frames<'_>,
     frame: &mut impl FnMut(&[f32]),
 ) {
     let rate = i32::try_from(mic.rate).unwrap_or(48_000);
@@ -163,7 +196,7 @@ fn listen_while_held(
 fn play_file(
     path: &std::path::Path,
     switches: &Switches,
-    frames: &mut Frames,
+    frames: &mut Frames<'_>,
     frame: &mut impl FnMut(&[f32]),
 ) {
     let read = |path: &std::path::Path| {

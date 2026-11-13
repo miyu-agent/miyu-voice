@@ -21,3 +21,26 @@ fn the_microphone_is_wanted_unless_she_speaks_without_headphones() {
         "a conversation started by miyu listen still waits until she stops"
     );
 }
+
+/// 连着 30 秒数字静音说一次；中间有一点声音就重新数，静下来再满 30 秒再说一次（施工 VO-26）。
+#[test]
+fn thirty_seconds_of_digital_silence_is_said_once() {
+    use super::{FRAME, SILENT_FOR, Silence};
+    let block = vec![0.0f32; FRAME];
+    let mut silence = Silence::default();
+    let blocks = SILENT_FOR / FRAME;
+    let said: usize = (0..blocks * 3).filter(|_| silence.heard(&block)).count();
+    assert_eq!(said, 1, "once for a long silent stretch");
+    assert!(!silence.heard(&[0.0, 0.2, 0.0]), "a sound resets it");
+    let again = (0..=blocks).filter(|_| silence.heard(&block)).count();
+    assert_eq!(again, 1, "said again after another 30 s");
+    let mut room = Silence::default();
+    let noise: Vec<f32> = (0..FRAME)
+        .map(|i| if i % 2 == 0 { 0.001 } else { -0.001 })
+        .collect();
+    assert_eq!(
+        (0..blocks * 2).filter(|_| room.heard(&noise)).count(),
+        0,
+        "a quiet room is not silent"
+    );
+}

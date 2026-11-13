@@ -63,6 +63,12 @@ fn record_once(args: &[String]) -> ExitCode {
         &Stopper::default(),
         Some(&speaker),
     ) {
+        Ok((pcm, _)) if voice_common::audio::silent(&pcm.samples) => {
+            eprintln!(
+                "silent_audio: the recording is digital silence: the microphone is muted, unplugged, or the system's default input carries no sound"
+            );
+            ExitCode::FAILURE
+        }
         Ok((pcm, ended)) => recognize_and_print(cache, &pcm, language, Some(ended.as_str())),
         Err(why) => {
             eprintln!("{why:?}");
