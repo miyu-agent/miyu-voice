@@ -121,3 +121,51 @@ fn other_systems_keep_every_device_once() {
         ])
     );
 }
+
+/// 设备默认 24 位的（主人的 USB 麦克风经 PipeWire）：要得到 f32 的改要 f32，采样率、声道数照默认的（施工 VO-27）。
+#[test]
+fn a_24_bit_default_is_opened_as_f32_when_offered() {
+    use cpal::{
+        SampleFormat, SupportedBufferSize, SupportedStreamConfig, SupportedStreamConfigRange,
+    };
+    let buffer = SupportedBufferSize::Range { min: 1, max: 4096 };
+    let default = SupportedStreamConfig::new(1, 48_000, buffer, SampleFormat::I24);
+    let range = |channels, format| {
+        SupportedStreamConfigRange::new(channels, 8_000, 192_000, buffer, format)
+    };
+    let offered = [
+        range(2, SampleFormat::F32),
+        range(1, SampleFormat::I16),
+        range(1, SampleFormat::F32),
+    ];
+    let chosen = super::choose(default, &offered);
+    assert_eq!(
+        (
+            chosen.sample_format(),
+            chosen.sample_rate(),
+            chosen.channels()
+        ),
+        (SampleFormat::F32, 48_000, 1)
+    );
+    // 没有 f32 可要的照默认的格式开（各种格式都收）。
+    let kept = super::choose(default, &[range(1, SampleFormat::I16)]);
+    assert_eq!(kept.sample_format(), SampleFormat::I24);
+}
+
+/// 24 位、无符号这些格式也平均成单声道 f32：满幅接近 1，零点是 0。
+#[test]
+fn every_sample_format_turns_into_mono_f32() {
+    let full = cpal::I24::new((1 << 23) - 1).unwrap();
+    let half = cpal::I24::new(1 << 22).unwrap();
+    let zero = cpal::I24::new(0).unwrap();
+    let got = super::mono(&[full, zero, half, half], 2);
+    assert!(
+        (got[0] - 0.5).abs() < 1e-3 && (got[1] - 0.5).abs() < 1e-3,
+        "{got:?}"
+    );
+    let unsigned = super::mono(&[128u8, 255u8], 1);
+    assert!(
+        unsigned[0].abs() < 1e-6 && (unsigned[1] - 1.0).abs() < 0.01,
+        "{unsigned:?}"
+    );
+}

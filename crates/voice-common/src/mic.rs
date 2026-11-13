@@ -149,9 +149,14 @@ impl Mic {
         let input = chosen
             .or_else(|| host.default_input_device())
             .ok_or_else(|| "No microphone was found.".to_string())?;
-        let supported = input
+        let default = input
             .default_input_config()
             .map_err(|error| format!("The microphone cannot be opened: {error}."))?;
+        let offered: Vec<cpal::SupportedStreamConfigRange> = input
+            .supported_input_configs()
+            .map(Iterator::collect)
+            .unwrap_or_default();
+        let supported = choose(default, &offered);
         let rate = supported.sample_rate();
         let channels = usize::from(supported.channels());
         let config = supported.config();
@@ -159,9 +164,17 @@ impl Mic {
         let failed: Arc<Mutex<Option<String>>> = Arc::default();
         let stream = match supported.sample_format() {
             SampleFormat::F32 => build::<f32>(&input, &config, channels, sender, &failed),
+            SampleFormat::F64 => build::<f64>(&input, &config, channels, sender, &failed),
+            SampleFormat::I8 => build::<i8>(&input, &config, channels, sender, &failed),
             SampleFormat::I16 => build::<i16>(&input, &config, channels, sender, &failed),
-            SampleFormat::U16 => build::<u16>(&input, &config, channels, sender, &failed),
+            SampleFormat::I24 => build::<cpal::I24>(&input, &config, channels, sender, &failed),
             SampleFormat::I32 => build::<i32>(&input, &config, channels, sender, &failed),
+            SampleFormat::I64 => build::<i64>(&input, &config, channels, sender, &failed),
+            SampleFormat::U8 => build::<u8>(&input, &config, channels, sender, &failed),
+            SampleFormat::U16 => build::<u16>(&input, &config, channels, sender, &failed),
+            SampleFormat::U24 => build::<cpal::U24>(&input, &config, channels, sender, &failed),
+            SampleFormat::U32 => build::<u32>(&input, &config, channels, sender, &failed),
+            SampleFormat::U64 => build::<u64>(&input, &config, channels, sender, &failed),
             other => Err(format!("Unsupported microphone sample format {other}.")),
         }?;
         stream
@@ -184,6 +197,42 @@ impl Mic {
     }
 }
 
+/// 照什么格式开（施工 VO-27）：设备默认的采样率、声道数不变，样本格式能要 f32 就要 f32（PipeWire、PulseAudio 都给，由它们转），
+/// 要不到的照设备默认的格式（[`build`] 各种格式都收）。主人的 USB 麦克风经 PipeWire 默认是 24 位（i24），原来只认 f32、i16、
+/// u16、i32，报「Unsupported microphone sample format i24」。
+fn choose(
+    default: cpal::SupportedStreamConfig,
+    offered: &[cpal::SupportedStreamConfigRange],
+) -> cpal::SupportedStreamConfig {
+    if default.sample_format() == SampleFormat::F32 {
+        return default;
+    }
+    let rate = default.sample_rate();
+    offered
+        .iter()
+        .find(|range| {
+            range.sample_format() == SampleFormat::F32
+                && range.channels() == default.channels()
+                && range.min_sample_rate() <= rate
+                && rate <= range.max_sample_rate()
+        })
+        .map_or(default, |range| range.with_sample_rate(rate))
+}
+
+/// 一块交错的多声道样本，平均成单声道的 f32。
+fn mono<T>(data: &[T], channels: usize) -> Vec<f32>
+where
+    T: SizedSample,
+    f32: FromSample<T>,
+{
+    data.chunks(channels.max(1))
+        .map(|frame| {
+            let sum: f32 = frame.iter().map(|s| s.to_sample::<f32>()).sum();
+            sum / f32::from(u16::try_from(frame.len()).unwrap_or(1))
+        })
+        .collect()
+}
+
 fn build<T>(
     input: &cpal::Device,
     config: &cpal::StreamConfig,
@@ -200,15 +249,8 @@ where
         .build_input_stream::<T, _, _>(
             *config,
             move |data: &[T], _| {
-                let mono: Vec<f32> = data
-                    .chunks(channels.max(1))
-                    .map(|frame| {
-                        let sum: f32 = frame.iter().map(|s| s.to_sample::<f32>()).sum();
-                        sum / f32::from(u16::try_from(frame.len()).unwrap_or(1))
-                    })
-                    .collect();
                 // 收的那一头走了（关麦）：丢掉。
-                let _ = chunks.send(mono);
+                let _ = chunks.send(mono(data, channels));
             },
             move |error| {
                 *failed.lock().unwrap_or_else(PoisonError::into_inner) =
