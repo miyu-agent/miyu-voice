@@ -43,3 +43,15 @@ fn personas_get_their_own_voice_and_others_the_default() {
     assert!((speed - 1.1).abs() < 1e-6);
     assert_eq!(settings.voice_for(None).0, "female-shaonv");
 }
+
+#[test]
+fn a_community_engine_is_ready_once_a_package_is_picked() {
+    let unpicked = Settings::from_config(&config(&json!({"say.engine": "community"})));
+    assert!(!unpicked.configured(), "no package picked yet");
+    let picked = Settings::from_config(&config(&json!({
+        "say.engine": "community",
+        "say.community.package": " deepseek ",
+    })));
+    assert_eq!(picked.community, "deepseek");
+    assert!(picked.configured());
+}

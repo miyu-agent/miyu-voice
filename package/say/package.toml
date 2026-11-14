@@ -38,6 +38,7 @@ choices = [
     { value = "minimax", name = { en = "MiniMax", zh = "MiniMax", ja = "MiniMax" } },
     { value = "mimo", name = { en = "MiMo (Xiaomi)", zh = "MiMo（小米）", ja = "MiMo（Xiaomi）" } },
     { value = "openai", name = { en = "OpenAI-compatible", zh = "OpenAI 兼容", ja = "OpenAI 互換" }, description = { en = "OpenAI, SiliconFlow, or a local GPT-SoVITS / Kokoro server with /audio/speech.", zh = "OpenAI、硅基流动，或者本机起的 GPT-SoVITS、Kokoro 这类带 /audio/speech 的服务。", ja = "OpenAI、SiliconFlow、または /audio/speech を持つローカルの GPT-SoVITS・Kokoro など。" } },
+    { value = "community", name = { en = "Community engine", zh = "社区引擎", ja = "コミュニティのエンジン" }, description = { en = "An installed package that plugs into tts.engine, such as deepseek.", zh = "装着的、接进 tts.engine 的包，例如 deepseek。", ja = "tts.engine に接続するインストール済みパッケージ（deepseek など）。" } },
 ]
 default = "minimax"
 layers = ["system"]
@@ -164,3 +165,17 @@ default = "gpt-4o-mini-tts"
 layers = ["system"]
 applies = "now"
 name = { en = "Model", zh = "模型", ja = "モデル" }
+
+# 社区引擎（施工 VO-29）：挑一个接进 tts.engine 的包，下拉照 engines 方法列装着的。
+[settings.community]
+name = { en = "Community engine", zh = "社区引擎", ja = "コミュニティのエンジン" }
+shown_when = { engine = "community" }
+
+[settings.community.package]
+type = "text"
+max = 100
+choices_from = "engines"
+layers = ["system"]
+applies = "now"
+name = { en = "Package", zh = "包", ja = "パッケージ" }
+description = { en = "Voices and speed follow that package; see its page for what it supports.", zh = "音色、语速照那个包的，它认哪些看它的说明。", ja = "声と速さはそのパッケージに従います。対応範囲はその説明を参照してください。" }

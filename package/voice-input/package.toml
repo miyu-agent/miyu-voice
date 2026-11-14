@@ -63,7 +63,8 @@ description = { en = "A rising tone when it starts listening, a falling one when
 [settings.engine]
 type = "text"
 max = 100
+choices_from = "engines"
 layers = ["system"]
 applies = "now"
 name = { en = "Engine", zh = "引擎", ja = "エンジン" }
-description = { en = "Empty: SenseVoice on this computer. Or the id of an installed package that plugs into stt.engine.", zh = "不填：本机的 SenseVoice。或者填一个接进 stt.engine 的、装着的包的编号。", ja = "空欄はこのコンピューターの SenseVoice。stt.engine に接続するインストール済みパッケージの ID も指定できます。" }
+description = { en = "SenseVoice on this computer (downloads a 163 MB model the first time), or an installed package that plugs into stt.engine, such as deepseek (no model download).", zh = "本机的 SenseVoice（第一次用要下 163 MB 的模型），或者装着的、接进 stt.engine 的包，例如 deepseek（不用下模型）。", ja = "このコンピューターの SenseVoice（初回に 163 MB のモデルをダウンロード）、または stt.engine に接続するインストール済みパッケージ（deepseek など、ダウンロード不要）。" }

@@ -1,7 +1,9 @@
 //! 包的配置（清单里的 `say.*`，设计 20 第六节「配置页」）：握手时交来、改了推来，key 是真值。照它配引擎，挑音色。
 
+use miyu_ext::Core;
 use serde_json::{Map, Value};
 
+use crate::community::Community;
 use crate::engine::Engine;
 use crate::{mimo, minimax, openai};
 
@@ -19,8 +21,10 @@ pub struct PersonaVoice {
 /// 读出来的配置。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
-    /// `minimax`、`mimo`、`openai`。
+    /// `minimax`、`mimo`、`openai`、`community`（社区引擎，施工 VO-29）。
     pub engine: String,
+    /// 选了社区引擎的：接进 `tts.engine` 的那个包的编号（`say.community.package`）。
+    pub community: String,
     /// 默认音色；空的用引擎的默认。
     pub voice: String,
     /// 默认语速。
@@ -73,6 +77,7 @@ impl Settings {
             .unwrap_or_default();
         Settings {
             engine: text("say.engine", "minimax"),
+            community: text("say.community.package", ""),
             voice: text("say.voice", ""),
             speed,
             personas,
@@ -94,14 +99,20 @@ impl Settings {
             "minimax" => !self.minimax_key.is_empty(),
             "mimo" => !self.mimo_key.is_empty(),
             "openai" => !self.openai_base_url.is_empty() && !self.openai_model.is_empty(),
+            // 挑了包就算配好：那个包没在运行的，合成时回 engine_failed。
+            "community" => !self.community.is_empty(),
             _ => false,
         }
     }
 
-    /// 照配置建选的引擎。
+    /// 照配置建选的引擎；社区引擎经 `core` 调总线。
     #[must_use]
-    pub fn engine(&self) -> Box<dyn Engine> {
+    pub fn engine(&self, core: &Core) -> Box<dyn Engine> {
         match self.engine.as_str() {
+            "community" => Box::new(Community {
+                package: self.community.clone(),
+                core: core.clone(),
+            }),
             "mimo" => Box::new(mimo::MiMo {
                 base_url: mimo::BASE_URL.to_string(),
                 key: self.mimo_key.clone(),

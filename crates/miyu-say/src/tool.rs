@@ -46,7 +46,7 @@ fn run(service: &Arc<Service>, args: &Value, call: &Call) -> Result<String, Stri
     }
     // 照这一轮的人格挑音色（核心 TC-1 起 tool.call 带 persona）；没有人格、没给它配的用默认音色。
     let audio = service
-        .speak(text, call.persona(), Format::Mp3)
+        .speak(call.core(), text, call.persona(), Format::Mp3)
         .map_err(|error| error.message)?;
     let folder = Path::new(call.cwd()).join(FOLDER);
     let name = format!("say-{}.mp3", short_hash(&audio.bytes));

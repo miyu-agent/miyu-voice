@@ -1,5 +1,5 @@
 //! 总线上的 `stt`（设计 20 第三节「形状」，核心 `docs/reference/bus.md`）：`stt.transcribe`、`stt.record`、`stt.stop`。
-//! 模型下好、校验过才登记（20 第五节；67 的 B8 照登记算 ready，头查到 ready 才画麦克风）。配置里选了社区的
+//! 模型下好、校验过才登记，选了社区引擎的马上登记（20 第五节、施工 VO-29；67 的 B8 照登记算 ready，头查到 ready 才画麦克风）。配置里选了社区的
 //! `stt.engine`（`voice-input.engine` 写那个包的编号）的，转好 16 kHz 的 wav 交给它认，过滤还是这边做。
 
 use std::path::PathBuf;
@@ -85,6 +85,11 @@ impl Service {
             .unwrap_or_else(PoisonError::into_inner) = Settings::from_config(&core.config());
     }
 
+    /// 用自带的 SenseVoice（没选社区引擎）：要模型。
+    pub fn own_model(&self) -> bool {
+        self.settings().engine.is_empty()
+    }
+
     fn settings(&self) -> Settings {
         self.settings
             .read()
@@ -92,7 +97,7 @@ impl Service {
             .clone()
     }
 
-    /// 登记 `stt.*` 三个方法（先不登记，模型下好了 `enable_methods`）和配置页用的 `microphones`。
+    /// 登记 `stt.*` 三个方法（先不登记，模型下好了 `enable_methods`）和配置页用的 `microphones`、`engines`。
     pub fn register(self: &Arc<Service>, ext: &mut Extension) {
         let service = Arc::clone(self);
         ext.method_with(
@@ -108,6 +113,23 @@ impl Service {
         ext.method_with(Method::new("microphones"), move |params, _, core| {
             only(params, &[])?;
             Ok(voice_common::mic::choices(&core.language()))
+        });
+        // 配置页「引擎」下拉的选项（施工 VO-29）：头一项是空值「本机的 SenseVoice」，后面是装着的、接进 stt.engine 的包。
+        ext.method_with(Method::new("engines"), move |params, _, core| {
+            only(params, &[])?;
+            let language = core.language();
+            let own = match language.as_str() {
+                "zh" => "本机的 SenseVoice",
+                "ja" => "このコンピューターの SenseVoice",
+                _ => "SenseVoice on this computer",
+            };
+            let mut choices = vec![json!({"value": "", "name": own})];
+            choices.extend(
+                voice_common::plugs::listed(core, "stt.engine")
+                    .iter()
+                    .map(|plugged| voice_common::plugs::choice(plugged, &language)),
+            );
+            Ok(json!({"choices": choices}))
         });
         let service = Arc::clone(self);
         ext.method_with(

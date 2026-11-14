@@ -4,6 +4,7 @@
 //! `say` 工具（[`tool`]）。人敲 `miyu say …` 时核心把参数原样交过来：命令当本机的头连核心，经总线找到在跑的 `tts` 去合成、
 //! 去放（`voice_common::client`），自己不读 key、不碰声卡。
 
+mod community;
 mod engine;
 mod http;
 mod mimo;
@@ -60,15 +61,24 @@ fn serve() {
     });
     // 只给自己的命令行用（`miyu say --voices` 经 package.call），不上总线。
     let for_voices = Arc::clone(&service);
-    ext.method_with(Method::new("voices"), move |_, _, _| {
+    ext.method_with(Method::new("voices"), move |_, _, core| {
         let voices: Vec<Value> = for_voices
             .settings()
-            .engine()
+            .engine(core)
             .voices()
             .into_iter()
             .map(|voice| json!({"id": voice.id, "name": voice.name}))
             .collect();
         Ok(json!({"voices": voices}))
+    });
+    // 配置页「社区引擎」下拉的选项（施工 VO-29）：装着的、接进 tts.engine 的包。
+    ext.method_with(Method::new("engines"), move |_, _, core| {
+        let language = core.language();
+        let choices: Vec<Value> = voice_common::plugs::listed(core, "tts.engine")
+            .iter()
+            .map(|plugged| voice_common::plugs::choice(plugged, &language))
+            .collect();
+        Ok(json!({"choices": choices}))
     });
     let on_ready = Arc::clone(&service);
     ext.ready(move |core| on_ready.refresh(core));

@@ -87,7 +87,7 @@ impl Service {
             Some(other) => return Err(bad(&format!("Unknown format {other}."))),
         };
         let text = params["text"].as_str().ok_or_else(|| bad("Give text."))?;
-        let audio = self.speak(text, params["persona"].as_str(), format)?;
+        let audio = self.speak(core, text, params["persona"].as_str(), format)?;
         let name = format!("speech.{}", format.as_str());
         let blob = blobs::put(core, &audio.bytes, &name, &audio.media_type).map_err(|error| {
             MethodError::new(
@@ -109,7 +109,7 @@ impl Service {
                 blobs::get(core, blob).map_err(|why| MethodError::new("bad_audio", why))?
             }
             (None, Some(text)) => {
-                self.speak(text, params["persona"].as_str(), Format::Wav)?
+                self.speak(core, text, params["persona"].as_str(), Format::Wav)?
                     .bytes
             }
             _ => return Err(bad("Give audio or text, not both.")),
@@ -124,13 +124,14 @@ impl Service {
     /// 照配置合成一段：这个人格的音色、语速。
     pub fn speak(
         &self,
+        core: &Core,
         text: &str,
         persona: Option<&str>,
         format: Format,
     ) -> Result<crate::engine::Audio, MethodError> {
         let settings = self.settings();
         let (voice, speed) = settings.voice_for(persona);
-        say::synthesize(settings.engine().as_ref(), text, &voice, speed, format)
+        say::synthesize(settings.engine(core).as_ref(), text, &voice, speed, format)
             .map_err(|error| MethodError::new(error.code(), error.message()))
     }
 }
