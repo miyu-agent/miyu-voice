@@ -4,6 +4,11 @@
 //!
 //! 提示音（施工 VO-25，项目主人 2026-11-13）：给了音箱的，麦克风开好以后先响上扬的一声、响完才开始听（这一声里麦克风收到的
 //! 丢掉，不当成人在说话），停了响下沉的一声。麦克风被占、打不开的不响。
+//!
+//! 音箱从拿到麦克风锁起一直开着，到下沉那一声放完（施工 VO-28，项目主人 11-14：「开始听那一下没有提示音」）：原来每一声
+//! 各开一次音箱，声卡闲了几秒被 PipeWire 挂起，叫醒它时把短音整个吞掉——上扬那声总落在挂起的声卡上，下沉那声只在
+//! 没说话、几秒就停的时候赶上声卡还醒着。开麦克风以前先开音箱，上扬那声放出去的时候声卡已经醒了。另外收音缓冲
+//! 原来照 PulseAudio 默认开到约 2 秒，开麦克风就要将近 2 秒，上扬那声跟着晚响，改成约 20 毫秒（`voice_common::mic`）。
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -63,16 +68,23 @@ pub fn record(
             "The microphone lock folder is not safe to use: {why}."
         )),
     })?;
+    // 开麦克风的同时把音箱开着（声卡醒过来），开不了的照样录、不响。
+    let awake = chimes.and_then(|speaker| speaker.awake().ok());
     let mic = Mic::open(device).map_err(RecordError::NoMicrophone)?;
     let rate = mic.rate;
-    if let Some(speaker) = chimes {
+    if let (Some(speaker), Some(_)) = (chimes, &awake) {
         chime::play_and_wait(speaker, Chime::Wake);
         while mic.chunks.try_recv().is_ok() {}
     }
     let result = listen(&mic, rate, silence_ms, max_ms, stopper);
     drop(mic);
-    if let Some(speaker) = chimes {
-        chime::play(speaker, Chime::Off);
+    if let (Some(speaker), Some(awake)) = (chimes, awake) {
+        // 下沉那一声另开线程放，放完才放开音箱。
+        let speaker = speaker.clone();
+        std::thread::spawn(move || {
+            chime::play_and_wait(&speaker, Chime::Off);
+            drop(awake);
+        });
     }
     result
 }

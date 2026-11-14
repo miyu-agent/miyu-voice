@@ -169,3 +169,24 @@ fn every_sample_format_turns_into_mono_f32() {
         "{unsigned:?}"
     );
 }
+
+/// 收音缓冲要约 20 毫秒，照设备的范围夹；说不出范围的照默认（施工 VO-28：默认的约 2 秒，开麦克风要等 2 秒）。
+#[test]
+fn the_capture_buffer_is_about_twenty_milliseconds() {
+    use cpal::{BufferSize, SupportedBufferSize};
+    let wide = SupportedBufferSize::Range {
+        min: 1,
+        max: 1 << 20,
+    };
+    assert_eq!(super::buffer_for(48_000, &wide), BufferSize::Fixed(960));
+    assert_eq!(super::buffer_for(16_000, &wide), BufferSize::Fixed(320));
+    let narrow = SupportedBufferSize::Range {
+        min: 2048,
+        max: 8192,
+    };
+    assert_eq!(super::buffer_for(48_000, &narrow), BufferSize::Fixed(2048));
+    assert_eq!(
+        super::buffer_for(48_000, &SupportedBufferSize::Unknown),
+        BufferSize::Default
+    );
+}

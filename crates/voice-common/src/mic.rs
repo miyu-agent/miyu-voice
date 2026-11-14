@@ -159,7 +159,8 @@ impl Mic {
         let supported = choose(default, &offered);
         let rate = supported.sample_rate();
         let channels = usize::from(supported.channels());
-        let config = supported.config();
+        let mut config = supported.config();
+        config.buffer_size = buffer_for(rate, supported.buffer_size());
         let (sender, chunks) = mpsc::channel::<Vec<f32>>();
         let failed: Arc<Mutex<Option<String>>> = Arc::default();
         let stream = match supported.sample_format() {
@@ -217,6 +218,18 @@ fn choose(
                 && rate <= range.max_sample_rate()
         })
         .map_or(default, |range| range.with_sample_rate(rate))
+}
+
+/// 收音的缓冲要多大：约 20 毫秒，设备说得出范围的照范围夹一下，说不出的照它默认（施工 VO-28）。经 PipeWire 的 PulseAudio
+/// 接口不写的话，它照默认把缓冲开到约 2 秒，开始收音（`play`）要等头一块攒满，开麦克风要将近 2 秒，语音输入开始听那一声
+/// 跟着晚 2 秒才响；写成 20 毫秒的 1 毫秒就开好，10 毫秒就有声音进来。
+fn buffer_for(rate: u32, supported: &cpal::SupportedBufferSize) -> cpal::BufferSize {
+    match supported {
+        cpal::SupportedBufferSize::Range { min, max } if min <= max => {
+            cpal::BufferSize::Fixed((rate / 50).clamp(*min, *max))
+        }
+        _ => cpal::BufferSize::Default,
+    }
 }
 
 /// 一块交错的多声道样本，平均成单声道的 f32。

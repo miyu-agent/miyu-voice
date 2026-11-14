@@ -74,23 +74,27 @@ impl Speaker {
     pub fn play(&self, audio: Vec<u8>) -> Result<bool, PlayError> {
         let inner = &self.inner;
         let mine = inner.generation.load(Ordering::SeqCst);
-        inner.pending.fetch_add(1, Ordering::SeqCst);
-        let used = inner.uses.fetch_add(1, Ordering::SeqCst) + 1;
+        let used = inner.take();
         let finished = inner.play_in_turn(audio, mine);
-        if inner.pending.fetch_sub(1, Ordering::SeqCst) == 1 {
-            // 最后一个放完了：等一会儿，还没有新的再关音箱。
-            let inner = Arc::clone(inner);
-            std::thread::spawn(move || {
-                std::thread::sleep(LINGER);
-                let mut open = inner.open.lock().unwrap_or_else(PoisonError::into_inner);
-                if inner.pending.load(Ordering::SeqCst) == 0
-                    && inner.uses.load(Ordering::SeqCst) == used
-                {
-                    *open = None;
-                }
-            });
-        }
+        Inner::give_back(inner, used);
         finished
+    }
+
+    /// 现在就开着音箱，直到交回的 [`Awake`] 丢掉（之后照常再开 [`LINGER`]）：开着的音箱一直放静音，声卡不会被声音服务挂起。
+    /// 先开好、过一会儿才放的短音（语音输入开始听、停止听的提示音，施工 VO-28）用它：声卡闲了几秒被 PipeWire 挂起以后，
+    /// 叫醒它的那一下会把开头吞掉，短音整个吞没了。
+    ///
+    /// # Errors
+    ///
+    /// 没有音箱。
+    pub fn awake(&self) -> Result<Awake, PlayError> {
+        let used = self.inner.take();
+        let opened = self.inner.ensure_open();
+        let awake = Awake {
+            inner: Arc::clone(&self.inner),
+            used,
+        };
+        opened.map(|()| awake)
     }
 
     /// 正在放的、排着的全停；交回停了几个。
@@ -111,7 +115,58 @@ impl Speaker {
     }
 }
 
+/// [`Speaker::awake`] 交回的：丢掉以前音箱一直开着。
+pub struct Awake {
+    inner: Arc<Inner>,
+    used: u64,
+}
+
+impl Drop for Awake {
+    fn drop(&mut self) {
+        Inner::give_back(&self.inner, self.used);
+    }
+}
+
 impl Inner {
+    /// 要用音箱了：算一个在用的，交回这是第几次用。
+    fn take(&self) -> u64 {
+        self.pending.fetch_add(1, Ordering::SeqCst);
+        self.uses.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// 用完了：最后一个用完的等 [`LINGER`]，还没有新的再关音箱。
+    fn give_back(inner: &Arc<Inner>, used: u64) {
+        if inner.pending.fetch_sub(1, Ordering::SeqCst) != 1 {
+            return;
+        }
+        let inner = Arc::clone(inner);
+        std::thread::spawn(move || {
+            std::thread::sleep(LINGER);
+            let mut open = inner.open.lock().unwrap_or_else(PoisonError::into_inner);
+            if inner.pending.load(Ordering::SeqCst) == 0
+                && inner.uses.load(Ordering::SeqCst) == used
+            {
+                *open = None;
+            }
+        });
+    }
+
+    /// 音箱没开的开起来。
+    fn ensure_open(&self) -> Result<(), PlayError> {
+        let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        if open.is_none() {
+            let mut sink = open_sink().map_err(|error| {
+                PlayError::NoSpeaker(format!("The speaker cannot be opened: {error}."))
+            })?;
+            sink.log_on_drop(false);
+            *open = Some(Open {
+                sink,
+                playing: None,
+            });
+        }
+        Ok(())
+    }
+
     fn play_in_turn(&self, audio: Vec<u8>, mine: u64) -> Result<bool, PlayError> {
         let decoder = Decoder::try_from(Cursor::new(audio))
             .map_err(|error| PlayError::BadAudio(format!("The audio cannot be read: {error}.")))?;
@@ -119,18 +174,9 @@ impl Inner {
         if self.generation.load(Ordering::SeqCst) != mine {
             return Ok(false);
         }
+        self.ensure_open()?;
         let player = {
             let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
-            if open.is_none() {
-                let mut sink = DeviceSinkBuilder::open_default_sink().map_err(|error| {
-                    PlayError::NoSpeaker(format!("The speaker cannot be opened: {error}."))
-                })?;
-                sink.log_on_drop(false);
-                *open = Some(Open {
-                    sink,
-                    playing: None,
-                });
-            }
             let Some(open) = open.as_mut() else {
                 return Ok(false);
             };
@@ -151,6 +197,24 @@ impl Inner {
         }
         Ok(true)
     }
+}
+
+/// 开音箱：系统默认的。测试用：设了 `MIYU_VOICE_TEST_SPEAKER`（输出设备的编号，例如 PipeWire 临时建的虚拟输出）的开它，
+/// 端到端测试照真的那一路放、录它的监听，不从主人的音箱出声（施工 VO-28）。
+fn open_sink() -> Result<MixerDeviceSink, String> {
+    if let Some(wanted) = std::env::var_os("MIYU_VOICE_TEST_SPEAKER") {
+        use rodio::cpal::traits::{DeviceTrait, HostTrait};
+        let wanted = wanted.to_string_lossy().into_owned();
+        let device = rodio::cpal::default_host()
+            .output_devices()
+            .map_err(|error| error.to_string())?
+            .find(|device| device.id().is_ok_and(|id| id.id() == wanted))
+            .ok_or_else(|| format!("no output device {wanted}"))?;
+        return DeviceSinkBuilder::from_device(device)
+            .and_then(DeviceSinkBuilder::open_stream)
+            .map_err(|error| error.to_string());
+    }
+    DeviceSinkBuilder::open_default_sink().map_err(|error| error.to_string())
 }
 
 /// 一段声音外面套一层：声卡每取走约 10 毫秒，把这一小块（几个声道平均成一个）交给旁听的。
