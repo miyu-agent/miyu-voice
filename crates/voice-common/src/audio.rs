@@ -110,6 +110,109 @@ pub fn wav_silent(bytes: &[u8]) -> Result<bool, BadAudio> {
     Ok(true)
 }
 
+/// 没听到说话的门槛（施工 VO-33，项目主人 11-17：录的是另一个没人对着说的麦克风，只有环境声，回「没听清」看不出毛病）：
+/// 整段最响的一帧（[`LOUDNESS_FRAME_MS`] 的均方根）都不到它，算没人说话，不送去认。约 -34 dBFS：对着麦克风正常说话
+/// 在 -25 到 -10 之间，风扇、空调这类底噪在 -50 到 -40 之间。不用端点那套「比开头的底噪响几倍」：一开口就说的，开头量的
+/// 底噪就是人声，会反过来判成没说话。
+pub const QUIET_RMS: f32 = 0.02;
+
+/// 量响度的一帧多长（毫秒）。
+pub const LOUDNESS_FRAME_MS: u32 = 30;
+
+/// 一段里听没听到说话：有一帧够响（[`QUIET_RMS`]）的就是听到了。`rate` 是采样率，样本是单声道。
+#[must_use]
+pub fn heard_speech(samples: &[f32], rate: u32) -> bool {
+    let mut loudest = Loudest::new(rate, 1);
+    samples.iter().any(|sample| loudest.push(*sample)) || loudest.finish()
+}
+
+/// wav 的字节里听没听到说话（几个声道的样本一起算响度）：一个个样本看，不整段解进内存，听到了就停。
+///
+/// # Errors
+///
+/// 不是 wav、wav 坏了。
+pub fn wav_heard_speech(bytes: &[u8]) -> Result<bool, BadAudio> {
+    let reader = hound::WavReader::new(Cursor::new(bytes))
+        .map_err(|error| BadAudio(format!("Not a readable WAV file: {error}.")))?;
+    let spec = reader.spec();
+    let mut loudest = Loudest::new(spec.sample_rate, spec.channels);
+    match spec.sample_format {
+        hound::SampleFormat::Float => {
+            for sample in reader.into_samples::<f32>() {
+                if loudest.push(sample.map_err(|error| broken(&error))?) {
+                    return Ok(true);
+                }
+            }
+        }
+        hound::SampleFormat::Int => {
+            let scale = 2f32.powi(i32::from(spec.bits_per_sample) - 1);
+            for sample in reader.into_samples::<i32>() {
+                if loudest.push(int_to_f32(sample.map_err(|error| broken(&error))?) / scale) {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+    Ok(loudest.finish())
+}
+
+/// wav 有多长（毫秒），只看头。
+///
+/// # Errors
+///
+/// 不是 wav、头坏了、采样率是 0。
+pub fn wav_duration_ms(bytes: &[u8]) -> Result<u64, BadAudio> {
+    let reader = hound::WavReader::new(Cursor::new(bytes))
+        .map_err(|error| BadAudio(format!("Not a readable WAV file: {error}.")))?;
+    let rate = u64::from(reader.spec().sample_rate);
+    if rate == 0 {
+        return Err(BadAudio("The WAV file has no sample rate.".to_string()));
+    }
+    Ok(u64::from(reader.duration()) * 1000 / rate)
+}
+
+/// 一帧帧量均方根，有一帧到了 [`QUIET_RMS`] 就算听到了。
+struct Loudest {
+    /// 一帧多少个样本（几个声道的算在一起）。
+    frame: usize,
+    sum: f32,
+    seen: usize,
+}
+
+impl Loudest {
+    fn new(rate: u32, channels: u16) -> Loudest {
+        let per_channel = usize::try_from(rate / 1000 * LOUDNESS_FRAME_MS).unwrap_or(480);
+        Loudest {
+            frame: (per_channel * usize::from(channels.max(1))).max(1),
+            sum: 0.0,
+            seen: 0,
+        }
+    }
+
+    /// 喂一个样本；这一帧满了、够响的交回 `true`。
+    fn push(&mut self, sample: f32) -> bool {
+        self.sum += sample * sample;
+        self.seen += 1;
+        if self.seen < self.frame {
+            return false;
+        }
+        self.finish_frame()
+    }
+
+    /// 最后不满一帧的也量一下（短得不到一帧的整段）。
+    fn finish(&mut self) -> bool {
+        self.seen > 0 && self.finish_frame()
+    }
+
+    fn finish_frame(&mut self) -> bool {
+        #[allow(clippy::cast_precision_loss)]
+        let rms = (self.sum / self.seen as f32).sqrt();
+        self.sum = 0.0;
+        self.seen = 0;
+        rms >= QUIET_RMS
+    }
+}
+
 /// 只看 wav 的头读不读得出来、不解样本：交给别的进程解之前先挡掉明显不是 wav 的（`bad_audio`）。
 ///
 /// # Errors

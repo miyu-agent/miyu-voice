@@ -154,6 +154,13 @@ impl Service {
             if audio::wav_silent(&bytes).map_err(|why| MethodError::new("bad_audio", why.0))? {
                 return Err(silent_audio());
             }
+            if !audio::wav_heard_speech(&bytes)
+                .map_err(|why| MethodError::new("bad_audio", why.0))?
+            {
+                let duration_ms = audio::wav_duration_ms(&bytes)
+                    .map_err(|why| MethodError::new("bad_audio", why.0))?;
+                return Ok(nothing_heard(&language, duration_ms, None, None));
+            }
             let heard = self
                 .workers
                 .transcribe_wav(&bytes, &language)
@@ -163,6 +170,9 @@ impl Service {
         let pcm = audio::read_wav(&bytes).map_err(|why| MethodError::new("bad_audio", why.0))?;
         if audio::silent(&pcm.samples) {
             return Err(silent_audio());
+        }
+        if !audio::heard_speech(&pcm.samples, pcm.rate) {
+            return Ok(nothing_heard(&language, pcm.duration_ms(), None, None));
         }
         Ok(answer(&self.recognize(core, &pcm, &language)?, None))
     }
@@ -174,7 +184,7 @@ impl Service {
         let silence_ms = number(params, "silence_ms", 1_200, 300, 5_000)?;
         let settings = self.settings();
         let microphone = Some(settings.microphone.as_str()).filter(|name| !name.is_empty());
-        let (pcm, ended) = record::record(
+        let (pcm, ended, device) = record::record(
             microphone,
             silence_ms,
             max_ms,
@@ -189,6 +199,14 @@ impl Service {
         })?;
         if audio::silent(&pcm.samples) {
             return Err(silent_audio());
+        }
+        if !audio::heard_speech(&pcm.samples, pcm.rate) {
+            return Ok(nothing_heard(
+                &language,
+                pcm.duration_ms(),
+                Some(&device),
+                Some(ended.as_str()),
+            ));
         }
         Ok(answer(
             &self.recognize(core, &pcm, &language)?,
@@ -250,6 +268,31 @@ fn answer(heard: &Heard, ended: Option<&str>) -> Value {
         "duration_ms": heard.duration_ms,
         "clear": heard.clear,
     });
+    if let Some(ended) = ended {
+        answer["ended"] = ended.into();
+    }
+    answer
+}
+
+/// 没听到说话（施工 VO-33，`voice_common::audio::QUIET_RMS`）：不送去认（也不花社区引擎的钱），照「没听清」回，多 `speech: false`；
+/// 录本机麦克风的再带 `device`（开的是哪个，给人看的名字），头照它说「没听到说话，看看麦克风选对没有，现在用的是 …」。
+/// 不当出错：认得的头照旧说「没听清」。
+fn nothing_heard(
+    language: &str,
+    duration_ms: u64,
+    device: Option<&str>,
+    ended: Option<&str>,
+) -> Value {
+    let mut answer = json!({
+        "text": "",
+        "language": language,
+        "duration_ms": duration_ms,
+        "clear": false,
+        "speech": false,
+    });
+    if let Some(device) = device.filter(|device| !device.is_empty()) {
+        answer["device"] = device.into();
+    }
     if let Some(ended) = ended {
         answer["ended"] = ended.into();
     }

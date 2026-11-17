@@ -125,6 +125,8 @@ pub struct Mic {
     pub chunks: mpsc::Receiver<Vec<f32>>,
     /// 采样率。
     pub rate: u32,
+    /// 开的是哪个设备（给人看的名字，同系统声音设置里的；问不到的是编号）：没听到说话时告诉人现在用的是哪个（施工 VO-33）。
+    pub name: String,
     failed: Arc<Mutex<Option<String>>>,
     _stream: cpal::Stream,
 }
@@ -149,6 +151,13 @@ impl Mic {
         let input = chosen
             .or_else(|| host.default_input_device())
             .ok_or_else(|| "No microphone was found.".to_string())?;
+        let name = input
+            .description()
+            .map(|description| description.name().to_string())
+            .ok()
+            .filter(|name| !name.trim().is_empty())
+            .or_else(|| input.id().ok().map(|id| id.id().to_string()))
+            .unwrap_or_default();
         let default = input
             .default_input_config()
             .map_err(|error| format!("The microphone cannot be opened: {error}."))?;
@@ -184,6 +193,7 @@ impl Mic {
         Ok(Mic {
             chunks,
             rate,
+            name,
             failed,
             _stream: stream,
         })

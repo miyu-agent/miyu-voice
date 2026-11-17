@@ -50,7 +50,7 @@ impl Stopper {
 }
 
 /// 录：`device` 是设备名（不写、找不到的用默认的），人声停了 `silence_ms` 停，最长 `max_ms`；`chimes` 给了音箱的，开始、
-/// 停止各响一声。
+/// 停止各响一声。交回录到的、为什么停、开的是哪个麦克风（给人看的名字）。
 ///
 /// # Errors
 ///
@@ -61,7 +61,7 @@ pub fn record(
     max_ms: u64,
     stopper: &Stopper,
     chimes: Option<&Speaker>,
-) -> Result<(Pcm, Ended), RecordError> {
+) -> Result<(Pcm, Ended, String), RecordError> {
     let _lock = MicLock::for_dictation().map_err(|error| match error {
         LockError::Busy => RecordError::MicBusy,
         LockError::Unsafe(why) => RecordError::NoMicrophone(format!(
@@ -77,6 +77,7 @@ pub fn record(
         while mic.chunks.try_recv().is_ok() {}
     }
     let result = listen(&mic, rate, silence_ms, max_ms, stopper);
+    let name = mic.name.clone();
     drop(mic);
     if let (Some(speaker), Some(awake)) = (chimes, awake) {
         // 下沉那一声另开线程放，放完才放开音箱。
@@ -86,7 +87,7 @@ pub fn record(
             drop(awake);
         });
     }
-    result
+    result.map(|(pcm, ended)| (pcm, ended, name))
 }
 
 /// 麦克风开好以后的这一段：一帧帧交给 [`Endpoint`]，到它说停、被叫停、设备出错。

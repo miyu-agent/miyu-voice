@@ -39,3 +39,17 @@ fn numbers_take_defaults_and_ranges() {
     assert_eq!(error.code.as_deref(), Some("bad_params"));
     assert!(only(&json!({"audio": "x", "lang": "zh"}), &["audio", "language"]).is_err());
 }
+
+/// 没听到说话（施工 VO-33）：照「没听清」回、多 `speech: false`；录本机麦克风的带设备名和为什么停，空的设备名不带。
+#[test]
+fn nothing_heard_is_an_unclear_answer_with_the_device() {
+    assert_eq!(
+        super::nothing_heard("zh", 5100, Some("fifine Microphone Mono"), Some("silence")),
+        serde_json::json!({"text": "", "language": "zh", "duration_ms": 5100, "clear": false,
+            "speech": false, "device": "fifine Microphone Mono", "ended": "silence"})
+    );
+    assert_eq!(
+        super::nothing_heard("auto", 800, Some(""), None),
+        serde_json::json!({"text": "", "language": "auto", "duration_ms": 800, "clear": false, "speech": false})
+    );
+}

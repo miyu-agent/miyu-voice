@@ -1,4 +1,4 @@
-use super::{read_wav, write_wav};
+use super::{QUIET_RMS, heard_speech, read_wav, wav_duration_ms, wav_heard_speech, write_wav};
 
 #[test]
 fn a_written_wav_reads_back() {
@@ -72,4 +72,45 @@ fn digital_silence_is_told_apart_from_a_quiet_room() {
     }
     const { assert!(SILENT_PEAK < 0.0001) };
     assert!(wav_silent(b"not a wav").is_err());
+}
+
+/// 没听到说话（施工 VO-33）：只有底噪的整段算没听到；中间有一小段正常说话响度的就算听到了，开头一开口就说的也算；
+/// 短得不到一帧的照样量；wav 的那一份和样本的那一份判得一样。
+#[test]
+fn speech_is_heard_by_the_loudest_frame_not_the_opening_noise() {
+    let rate = 16_000;
+    // 底噪：约 -46 dBFS 的方波，比门槛小。
+    let hum = |n: usize| -> Vec<f32> {
+        (0..n)
+            .map(|i| if i % 2 == 0 { 0.005 } else { -0.005 })
+            .collect()
+    };
+    // 正常说话的响度：约 -20 dBFS。
+    let voice = |n: usize| -> Vec<f32> {
+        (0..n)
+            .map(|i| if i % 2 == 0 { 0.1 } else { -0.1 })
+            .collect()
+    };
+    let quiet = hum(rate as usize * 3);
+    assert!(!heard_speech(&quiet, rate));
+    assert!(!wav_heard_speech(&write_wav(&quiet, rate)).unwrap());
+    assert_eq!(wav_duration_ms(&write_wav(&quiet, rate)).unwrap(), 3000);
+    // 中间说了 0.2 秒。
+    let mut spoke = hum(rate as usize);
+    spoke.extend(voice(3200));
+    spoke.extend(hum(rate as usize));
+    assert!(heard_speech(&spoke, rate));
+    assert!(wav_heard_speech(&write_wav(&spoke, rate)).unwrap());
+    // 一开口就说：开头就是人声。
+    let mut at_once = voice(rate as usize / 2);
+    at_once.extend(hum(rate as usize));
+    assert!(heard_speech(&at_once, rate));
+    // 不到一帧（30 毫秒是 480 个样本）的一小段。
+    assert!(heard_speech(&voice(100), rate));
+    assert!(!heard_speech(&hum(100), rate));
+    // 门槛本身：正好到门槛的算听到。
+    let edge: Vec<f32> = (0..480)
+        .map(|i| if i % 2 == 0 { QUIET_RMS } else { -QUIET_RMS })
+        .collect();
+    assert!(heard_speech(&edge, rate));
 }
