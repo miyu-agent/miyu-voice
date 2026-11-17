@@ -71,13 +71,15 @@ fn serve() {
             .collect();
         Ok(json!({"voices": voices}))
     });
-    // 配置页「社区引擎」下拉的选项（施工 VO-29）：装着的、接进 tts.engine 的包。
+    // 配置页「引擎」下拉的选项（施工 VO-29、VO-32）：内置的几家，后面接着装着的、接进 tts.engine 的包，排在一张列表里。
     ext.method_with(Method::new("engines"), move |_, _, core| {
         let language = core.language();
-        let choices: Vec<Value> = voice_common::plugs::listed(core, "tts.engine")
-            .iter()
-            .map(|plugged| voice_common::plugs::choice(plugged, &language))
-            .collect();
+        let mut choices = settings::built_in_choices(&language);
+        choices.extend(
+            voice_common::plugs::listed(core, "tts.engine")
+                .iter()
+                .map(|plugged| voice_common::plugs::choice(plugged, &language)),
+        );
         Ok(json!({"choices": choices}))
     });
     let on_ready = Arc::clone(&service);

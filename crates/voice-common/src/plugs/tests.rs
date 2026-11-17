@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use super::{Plugged, choice, listed_in};
+use super::{Plugged, choice, listed_in, name_in};
 
 #[test]
 fn only_packages_plugged_into_that_name_are_listed() {
@@ -15,11 +15,13 @@ fn only_packages_plugged_into_that_name_are_listed() {
         [
             Plugged {
                 package: "deepseek".into(),
-                ready: true
+                ready: true,
+                name: None,
             },
             Plugged {
                 package: "whisper".into(),
-                ready: false
+                ready: false,
+                name: None,
             },
         ]
     );
@@ -31,6 +33,7 @@ fn a_package_not_running_says_so_in_the_dropdown() {
     let running = Plugged {
         package: "deepseek".into(),
         ready: true,
+        name: None,
     };
     assert_eq!(
         choice(&running, "zh"),
@@ -42,4 +45,20 @@ fn a_package_not_running_says_so_in_the_dropdown() {
     };
     assert_eq!(choice(&stopped, "zh")["description"], "没在运行");
     assert_eq!(choice(&stopped, "fr")["description"], "Not running");
+}
+
+/// 下拉里写包的名字（照界面语言），值照旧是编号；问不到名字的写编号（施工 VO-32）。
+#[test]
+fn the_dropdown_shows_the_package_name_and_stores_its_id() {
+    let named = Plugged {
+        package: "deepseek-tools".into(),
+        ready: true,
+        name: name_in(&json!({"package": "deepseek-tools", "name": "DeepSeek 功能全家桶"})),
+    };
+    assert_eq!(
+        choice(&named, "zh"),
+        json!({"value": "deepseek-tools", "name": "DeepSeek 功能全家桶"})
+    );
+    assert_eq!(name_in(&json!({"package": "x"})), None);
+    assert_eq!(name_in(&json!({"name": "  "})), None);
 }

@@ -33,18 +33,17 @@ methods = ["tts.synthesize", "tts.play", "tts.stop"]
 # 改了就生效：扩展收到推送，换引擎；选的引擎没配好的，tts.* 撤掉登记（头就不画朗读按钮）。
 
 [settings.engine]
-type = "option"
-choices = [
-    { value = "minimax", name = { en = "MiniMax", zh = "MiniMax", ja = "MiniMax" } },
-    { value = "mimo", name = { en = "MiMo (Xiaomi)", zh = "MiMo（小米）", ja = "MiMo（Xiaomi）" } },
-    { value = "openai", name = { en = "OpenAI-compatible", zh = "OpenAI 兼容", ja = "OpenAI 互換" }, description = { en = "OpenAI, SiliconFlow, or a local GPT-SoVITS / Kokoro server with /audio/speech.", zh = "OpenAI、硅基流动，或者本机起的 GPT-SoVITS、Kokoro 这类带 /audio/speech 的服务。", ja = "OpenAI、SiliconFlow、または /audio/speech を持つローカルの GPT-SoVITS・Kokoro など。" } },
-    { value = "community", name = { en = "Community engine", zh = "社区引擎", ja = "コミュニティのエンジン" }, description = { en = "An installed package that plugs into tts.engine, such as deepseek.", zh = "装着的、接进 tts.engine 的包，例如 deepseek。", ja = "tts.engine に接続するインストール済みパッケージ（deepseek など）。" } },
-]
+# 下拉照这个包的 engines 方法给（核心 SG-2 的 choices_from）：内置的几家（名字在 crates/miyu-say/data/engines.json），后面接着装着的、
+# 接进 tts.engine 的包（写包的名字，存包的编号），排在一张列表里，不再先选「社区」再选包（施工 VO-32，项目主人 11-17）。
+# 下面各家那几节照它的值 shown_when（核心 SW-1：带 choices_from 的 text 也能指）。
+type = "text"
+max = 100
+choices_from = "engines"
 default = "minimax"
 layers = ["system"]
 applies = "now"
 name = { en = "Engine", zh = "引擎", ja = "エンジン" }
-description = { en = "Which service turns text into speech.", zh = "用哪家把字念出来。", ja = "どのサービスで読み上げるか。" }
+description = { en = "Which service turns text into speech: a built-in one, or an installed package that plugs into tts.engine, such as DeepSeek.", zh = "用哪家把字念出来：内置的几家，或者装着的、接进 tts.engine 的包，例如 DeepSeek。", ja = "どのサービスで読み上げるか：内蔵のもの、または tts.engine に接続するインストール済みパッケージ（DeepSeek など）。" }
 
 [settings.voice]
 type = "text"
@@ -165,17 +164,3 @@ default = "gpt-4o-mini-tts"
 layers = ["system"]
 applies = "now"
 name = { en = "Model", zh = "模型", ja = "モデル" }
-
-# 社区引擎（施工 VO-29）：挑一个接进 tts.engine 的包，下拉照 engines 方法列装着的。
-[settings.community]
-name = { en = "Community engine", zh = "社区引擎", ja = "コミュニティのエンジン" }
-shown_when = { engine = "community" }
-
-[settings.community.package]
-type = "text"
-max = 100
-choices_from = "engines"
-layers = ["system"]
-applies = "now"
-name = { en = "Package", zh = "包", ja = "パッケージ" }
-description = { en = "Voices and speed follow that package; see its page for what it supports.", zh = "音色、语速照那个包的，它认哪些看它的说明。", ja = "声と速さはそのパッケージに従います。対応範囲はその説明を参照してください。" }

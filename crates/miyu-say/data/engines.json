@@ -1,0 +1,13 @@
+[
+  { "value": "minimax", "name": { "en": "MiniMax", "zh": "MiniMax", "ja": "MiniMax" } },
+  { "value": "mimo", "name": { "en": "MiMo (Xiaomi)", "zh": "MiMo（小米）", "ja": "MiMo（Xiaomi）" } },
+  {
+    "value": "openai",
+    "name": { "en": "OpenAI-compatible", "zh": "OpenAI 兼容", "ja": "OpenAI 互換" },
+    "description": {
+      "en": "OpenAI, SiliconFlow, or a local GPT-SoVITS / Kokoro server with /audio/speech.",
+      "zh": "OpenAI、硅基流动，或者本机起的 GPT-SoVITS、Kokoro 这类带 /audio/speech 的服务。",
+      "ja": "OpenAI、SiliconFlow、または /audio/speech を持つローカルの GPT-SoVITS・Kokoro など。"
+    }
+  }
+]

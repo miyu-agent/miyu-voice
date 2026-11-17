@@ -18,13 +18,36 @@ pub struct PersonaVoice {
     pub speed: f32,
 }
 
+/// 内置的引擎（`say.engine` 写这几个的是它们，别的值是社区引擎的包编号）。下拉里的名字、说明在 `data/engines.json`。
+pub const BUILT_IN: [&str; 3] = ["minimax", "mimo", "openai"];
+
+/// 配置页「引擎」下拉里内置的那几项（`data/engines.json`），名字、说明照界面语言挑，没有这种语言的用英文。
+#[must_use]
+pub fn built_in_choices(language: &str) -> Vec<Value> {
+    let listed: Vec<Value> =
+        serde_json::from_str(include_str!("../data/engines.json")).unwrap_or_default();
+    let pick = |words: &Value| words.get(language).or_else(|| words.get("en")).cloned();
+    listed
+        .iter()
+        .map(|engine| {
+            let mut choice = serde_json::json!({"value": engine["value"]});
+            if let Some(name) = pick(&engine["name"]) {
+                choice["name"] = name;
+            }
+            if let Some(description) = pick(&engine["description"]) {
+                choice["description"] = description;
+            }
+            choice
+        })
+        .collect()
+}
+
 /// 读出来的配置。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
-    /// `minimax`、`mimo`、`openai`、`community`（社区引擎，施工 VO-29）。
+    /// 内置的 `minimax`、`mimo`、`openai`（[`BUILT_IN`]），别的是接进 `tts.engine` 的那个包的编号（社区引擎，施工 VO-29；
+    /// 和内置的排在同一张下拉里，不再先选「社区」再选包，施工 VO-32）。
     pub engine: String,
-    /// 选了社区引擎的：接进 `tts.engine` 的那个包的编号（`say.community.package`）。
-    pub community: String,
     /// 默认音色；空的用引擎的默认。
     pub voice: String,
     /// 默认语速。
@@ -77,7 +100,6 @@ impl Settings {
             .unwrap_or_default();
         Settings {
             engine: text("say.engine", "minimax"),
-            community: text("say.community.package", ""),
             voice: text("say.voice", ""),
             speed,
             personas,
@@ -99,9 +121,9 @@ impl Settings {
             "minimax" => !self.minimax_key.is_empty(),
             "mimo" => !self.mimo_key.is_empty(),
             "openai" => !self.openai_base_url.is_empty() && !self.openai_model.is_empty(),
+            "" => false,
             // 挑了包就算配好：那个包没在运行的，合成时回 engine_failed。
-            "community" => !self.community.is_empty(),
-            _ => false,
+            _ => true,
         }
     }
 
@@ -109,8 +131,8 @@ impl Settings {
     #[must_use]
     pub fn engine(&self, core: &Core) -> Box<dyn Engine> {
         match self.engine.as_str() {
-            "community" => Box::new(Community {
-                package: self.community.clone(),
+            package if !package.is_empty() && !BUILT_IN.contains(&package) => Box::new(Community {
+                package: package.to_string(),
                 core: core.clone(),
             }),
             "mimo" => Box::new(mimo::MiMo {
