@@ -61,14 +61,35 @@ pub fn synthesize(
     if text.chars().count() > LONGEST_CHARS {
         return Err(SayError::TooLong);
     }
-    engine
+    let mut audio = engine
         .synthesize(&Request {
             text,
             voice: voice.to_string(),
             speed,
             format,
         })
-        .map_err(SayError::Engine)
+        .map_err(SayError::Engine)?;
+    if let Some(real) = sniffed(&audio.bytes) {
+        audio.media_type = real.to_string();
+    }
+    Ok(audio)
+}
+
+/// 照开头几个字节认真实的格式（施工 VO-35）：几家引擎照「要的格式」报类型，可本机的 GPT-SoVITS 这类不管要什么都回 wav，
+/// 照报的写，存出来的文件叫 .mp3、交给场所的 `media_type` 也是错的。认不出的交回空的，照引擎报的。
+#[must_use]
+pub fn sniffed(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WAVE".as_slice()) {
+        Some("audio/wav")
+    } else if bytes.starts_with(b"OggS") {
+        Some("audio/ogg")
+    } else if bytes.starts_with(b"ID3")
+        || (bytes.len() > 1 && bytes[0] == 0xFF && bytes[1] & 0xE0 == 0xE0)
+    {
+        Some("audio/mpeg")
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]

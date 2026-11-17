@@ -12,7 +12,7 @@ publish = false
 [workspace.dependencies]
 # 开发包（miyu-sdk 的 Rust 版）：握手、一行一条的收发、几个调用同时来、方法的时限和错误码、等模型下好再登记。只走协议，
 # 不依赖核心的 crate（AGENTS.md 第 1 条）。钉一个提交，升级改这里、刷 Cargo.lock。
-miyu-ext = { git = "https://github.com/miyu-agent/miyu-sdk", rev = "dee65a91f1650a8eb1d2dc2ac330b4bb21926099" }
+miyu-ext = { git = "https://github.com/miyu-agent/miyu-sdk", rev = "56c0ad47d4a854a80d77807a46ef37d0891668c3" }
 serde_json = "1"
 voice-common = { path = "crates/voice-common" }
 

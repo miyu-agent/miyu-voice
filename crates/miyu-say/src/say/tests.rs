@@ -53,3 +53,23 @@ fn nothing_to_say_and_too_long_are_refused_before_the_engine() {
     assert_eq!(error.code(), "too_long");
     assert!(fake.seen.lock().unwrap().is_empty(), "no request was sent");
 }
+
+/// 照开头的字节认格式：wav、ogg、带 ID3 头的和裸帧的 mp3；认不出的不改（施工 VO-35）。
+#[test]
+fn the_real_format_is_read_from_the_bytes() {
+    let wav = voice_common::audio::write_wav(&[0.0; 16], 16_000);
+    assert_eq!(super::sniffed(&wav), Some("audio/wav"));
+    assert_eq!(super::sniffed(b"OggS\0\x02"), Some("audio/ogg"));
+    assert_eq!(super::sniffed(b"ID3\x04\0"), Some("audio/mpeg"));
+    assert_eq!(
+        super::sniffed(&[0xFF, 0xFB, 0x90, 0x00]),
+        Some("audio/mpeg")
+    );
+    assert_eq!(
+        super::sniffed(b"RIFF\0\0\0\0AVI "),
+        None,
+        "a RIFF that is not WAVE"
+    );
+    assert_eq!(super::sniffed(b"{\"error\""), None);
+    assert_eq!(super::sniffed(&[]), None);
+}
