@@ -56,3 +56,44 @@ fn code_blocks_are_not_cut_in_half() {
         Some("```\nlet a = 1;\na.max(2);\n```\n就好了。".to_string())
     );
 }
+
+/// 四个反引号开的围栏照 `CommonMark` 认（审计 #124）：一行只认一次，关的要同一种字符、不少于开的个数；里面的三个反引号是代码。
+#[test]
+fn longer_fences_and_tildes_are_not_cut() {
+    let mut reply = Reply::default();
+    reply.start(0, "text");
+    assert_eq!(
+        reply.text(0, "看这段：\n````md\n```\n"),
+        Some("看这段：".to_string())
+    );
+    assert_eq!(reply.text(0, "a.\nb.\n```\n"), None, "inside the fence");
+    assert_eq!(
+        reply.text(0, "````\n好了。"),
+        Some("````md\n```\na.\nb.\n```\n````\n好了。".to_string())
+    );
+    assert_eq!(reply.text(0, "\n~~~\nx。\n"), None, "inside a tilde fence");
+    assert_eq!(
+        reply.text(0, "~~~\n完。"),
+        Some("~~~\nx。\n~~~\n完。".to_string())
+    );
+}
+
+/// 多行的表格一起交出去（审计 #124）：一行一行交，每行单看不是表格，竖线被念出来。
+#[test]
+fn tables_go_out_whole() {
+    let mut reply = Reply::default();
+    reply.start(0, "text");
+    assert_eq!(
+        reply.text(0, "结果如下：\n| a | b |\n"),
+        Some("结果如下：".to_string())
+    );
+    assert_eq!(
+        reply.text(0, "|---|---|\n| 好。 | 2 |\n"),
+        None,
+        "inside the table"
+    );
+    assert_eq!(
+        reply.text(0, "\n就这些。"),
+        Some("| a | b |\n|---|---|\n| 好。 | 2 |\n\n就这些。".to_string())
+    );
+}

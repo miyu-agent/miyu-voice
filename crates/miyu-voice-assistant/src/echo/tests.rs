@@ -123,3 +123,22 @@ fn after_she_stops_the_leftover_comes_out_in_order() {
     );
     assert!(later[40..].iter().all(|sample| (sample - 0.5).abs() < 1e-6));
 }
+
+/// 麦克风关着（半双工她说话那段、麦克风一直打不开）时放的那一路只留最近 2 秒（审计 #123）：不一直涨，重开时也不把积压的旧声音
+/// 一次喂给回声消除。
+#[test]
+fn played_keeps_only_the_last_two_seconds() {
+    let played = Played::default();
+    let tap = played.tap();
+    let block: Vec<f32> = (0..2_400u16).map(f32::from).collect();
+    // 24 kHz，一块 0.1 秒，放 5 秒。
+    for _ in 0..50 {
+        tap(&block, 24_000);
+    }
+    let (rate, samples) = played.take();
+    assert_eq!(rate, 24_000);
+    assert_eq!(samples.len(), 48_000);
+    // 留下的是最新的：最后一个采样还是最后那块的最后一个。
+    assert_eq!(samples.last().copied(), Some(2_399.0));
+    assert_eq!(samples.first().copied(), Some(0.0));
+}

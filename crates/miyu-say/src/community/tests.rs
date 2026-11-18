@@ -96,3 +96,26 @@ fn voices_read_ids_and_fall_back_to_the_id_for_a_name() {
         [("stella", "Stella"), ("tide", "tide")]
     );
 }
+
+/// 几段 mp3 拼之前去掉每段的 ID3 标签和 Xing 头帧（审计 #126）：头帧里写着第一段的帧数，硬拼的播完第一段就停。
+#[test]
+fn mp3_pieces_lose_their_tags_and_header_frames_before_joining() {
+    use crate::mp3::tests::{frame, id3};
+    let header = [0xFF, 0xFB, 0x90, 0x00];
+    let piece = |fill: u8| {
+        let mut bytes = id3(20);
+        bytes.extend(frame(header, 417, 0, Some((36, b"Xing"))));
+        bytes.extend(frame(header, 417, fill, None));
+        Audio {
+            bytes,
+            media_type: "audio/mpeg".to_string(),
+            duration_ms: Some(500),
+        }
+    };
+    let joined = joined(vec![piece(1), piece(2)]).unwrap();
+    let mut expected = frame(header, 417, 1, None);
+    expected.extend(frame(header, 417, 2, None));
+    assert_eq!(joined.bytes.len(), expected.len());
+    assert!(joined.bytes == expected, "only the audio frames are left");
+    assert_eq!(joined.duration_ms, Some(1_000));
+}

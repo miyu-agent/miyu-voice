@@ -5,7 +5,7 @@ S=${MIYU_VOICE_E2E:?set MIYU_VOICE_E2E to a scratch folder, see tools/e2e/README
 CORE=${MIYU_CORE:?set MIYU_CORE to a built core checkout}
 M=$CORE/target/release/miyu
 V=$(cd "$(dirname "$0")/../.." && pwd)
-W=$S/model-dl/x/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09/test_wavs
+W=$S/model-dl/x/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/test_wavs
 export MIYU_HOME=$S/e2e-home XDG_RUNTIME_DIR=$S/e2e-run MIYU_RESOURCES=$CORE/resources ALSA_CONFIG_PATH=/dev/null MIYU_VOICE_TEST_MIC=$S/silence60.wav
 # 通知不往桌面上弹，一条一行记进文件（施工 VO-16）。
 export MIYU_VOICE_TEST_NOTICES=$S/notices.log; rm -f $S/notices.log

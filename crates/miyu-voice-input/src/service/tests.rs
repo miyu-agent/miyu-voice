@@ -53,3 +53,23 @@ fn nothing_heard_is_an_unclear_answer_with_the_device() {
         serde_json::json!({"text": "", "language": "auto", "duration_ms": 800, "clear": false, "speech": false})
     );
 }
+
+/// 社区引擎那一路也守 10 分钟上限（审计 #122）：超了的照头回 `too_long`，不整段解码；没超的照常解。
+#[test]
+fn the_community_engine_path_refuses_audio_over_ten_minutes() {
+    use crate::recognize::LONGEST_MS;
+    // 1 kHz 的采样率，10 分 1 秒只要六十万个样本，测试里造得起。
+    let long = voice_common::audio::write_wav(&vec![0.0; 601_000], 1_000);
+    let error = super::community_pcm(&long).expect_err("over ten minutes");
+    assert_eq!(error.code.as_deref(), Some("too_long"));
+    let short = voice_common::audio::write_wav(&vec![0.0; 1_000], 1_000);
+    assert_eq!(
+        super::community_pcm(&short)
+            .map(|pcm| pcm.samples.len())
+            .ok(),
+        Some(1_000)
+    );
+    let error = super::within_limit(LONGEST_MS + 1).expect_err("over ten minutes");
+    assert_eq!(error.code.as_deref(), Some("too_long"));
+    assert!(super::within_limit(LONGEST_MS).is_ok());
+}

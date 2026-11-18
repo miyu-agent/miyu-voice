@@ -189,8 +189,9 @@ impl Loudest {
         }
     }
 
-    /// 喂一个样本；这一帧满了、够响的交回 `true`。
+    /// 喂一个样本；这一帧满了、够响的交回 `true`。NaN、无穷当 0（审计 #127）。
     fn push(&mut self, sample: f32) -> bool {
+        let sample = if sample.is_finite() { sample } else { 0.0 };
         self.sum += sample * sample;
         self.seen += 1;
         if self.seen < self.frame {

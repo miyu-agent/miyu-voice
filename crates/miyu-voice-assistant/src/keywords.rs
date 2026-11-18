@@ -140,13 +140,36 @@ const ROMAJI: &[(&str, &[&str])] = &[
     ("e", &["e", "ei"]),
     ("o", &["wo", "ou"]),
     ("n", &["en"]),
+    // 训令式、外来音（审计 #125）：拉丁字母写的 tina、sisi，假名拼的 ティ、フィ、ヴァ、シェ。
+    ("ti", &["ti"]),
+    ("tu", &["tu"]),
+    ("si", &["si", "xi"]),
+    ("zi", &["zi"]),
+    ("ci", &["ci"]),
+    ("tsa", &["ca"]),
+    ("tsi", &["ci"]),
+    ("tse", &["cei", "ce"]),
+    ("tso", &["cou", "ce"]),
+    ("fa", &["fa"]),
+    ("fi", &["fei"]),
+    ("fe", &["fei"]),
+    ("fo", &["fo"]),
+    ("va", &["wa"]),
+    ("vi", &["wei"]),
+    ("vu", &["wu"]),
+    ("ve", &["wei"]),
+    ("vo", &["wo"]),
+    ("she", &["she"]),
+    ("che", &["che"]),
+    ("je", &["jie"]),
+    ("ye", &["ye"]),
 ];
 
 /// 假名 → 罗马音，一对一段：假名紧接着它的罗马音。
 const KANA: &str = "あa いi うu えe おo かka きki くku けke こko さsa しshi すsu せse そso たta ちchi つtsu てte とto \
     なna にni ぬnu ねne のno はha ひhi ふfu へhe ほho まma みmi むmu めme もmo やya ゆyu よyo らra りri るru れre ろro \
     わwa をwo んn がga ぎgi ぐgu げge ごgo ざza じji ずzu ぜze ぞzo だda ぢji づzu でde どdo ばba びbi ぶbu べbe ぼbo \
-    ぱpa ぴpi ぷpu ぺpe ぽpo";
+    ぱpa ぴpi ぷpu ぺpe ぽpo ゔvu";
 
 /// 标调：元音、它的一到四声。
 const MARKS: [(char, [char; 4]); 6] = [
@@ -236,13 +259,18 @@ enum Unit {
 fn units(keyword: &str) -> Result<Vec<Unit>, BadKeyword> {
     let mut units = Vec::new();
     let mut latin = String::new();
+    // 最后一个假名音节在 `latin` 里从哪开始：小写元音要知道前一个音节是不是光一个元音。
+    let mut syllable_start = 0;
     for ch in keyword.chars() {
         if let Some(pinyin) = ch.to_pinyin() {
             flush(&mut latin, &mut units)?;
             units.push(Unit::Fixed(pinyin.with_tone().to_string()));
         } else if let Some(kana) = kana(ch) {
             match kana {
-                Kana::Syllable(text) => latin.push_str(text),
+                Kana::Syllable(text) => {
+                    syllable_start = latin.len();
+                    latin.push_str(text);
+                }
                 // 拗音：前一个 i 段音节去掉 i 接 ya/yu/yo（ki+ya=kya，shi+ya=sha）。
                 Kana::Small(suffix) => {
                     let trimmed = latin.trim_end_matches('i').len();
@@ -251,6 +279,24 @@ fn units(keyword: &str) -> Result<Vec<Unit>, BadKeyword> {
                         latin.push_str(&suffix[1..]);
                     } else {
                         latin.push_str(suffix);
+                    }
+                }
+                // 小写元音：前一个音节去掉结尾的元音接上它（テ+ィ=ti，フ+ィ=fi，ヴ+ァ=va）；前一个光是 u、i 的变成
+                // w、y（ウィ=wi，イェ=ye）；前一个不以元音结尾的（ン）不发音（审计 #125）。
+                Kana::SmallVowel(vowel) => {
+                    if let Some(last) = latin.pop() {
+                        if "aiueo".contains(last) {
+                            if latin.len() == syllable_start {
+                                match last {
+                                    'u' => latin.push('w'),
+                                    'i' => latin.push('y'),
+                                    _ => latin.push(last),
+                                }
+                            }
+                            latin.push(vowel);
+                        } else {
+                            latin.push(last);
+                        }
                     }
                 }
                 Kana::Skip => {}
@@ -302,7 +348,9 @@ enum Kana {
     Syllable(&'static str),
     /// 小写的 ゃゅょ：和前一个音节拼成拗音。
     Small(&'static str),
-    /// 促音、小写元音：不单独发音。
+    /// 小写的 ぁぃぅぇぉ：和前一个音节拼（ティ、フィ、ヴァ）。
+    SmallVowel(char),
+    /// 促音、小写的 ゎ：不单独发音。
     Skip,
 }
 
@@ -319,7 +367,12 @@ fn kana(ch: char) -> Option<Kana> {
         'ゃ' => return Some(Kana::Small("ya")),
         'ゅ' => return Some(Kana::Small("yu")),
         'ょ' => return Some(Kana::Small("yo")),
-        'っ' | 'ぁ' | 'ぃ' | 'ぅ' | 'ぇ' | 'ぉ' | 'ゎ' => return Some(Kana::Skip),
+        'ぁ' => return Some(Kana::SmallVowel('a')),
+        'ぃ' => return Some(Kana::SmallVowel('i')),
+        'ぅ' => return Some(Kana::SmallVowel('u')),
+        'ぇ' => return Some(Kana::SmallVowel('e')),
+        'ぉ' => return Some(Kana::SmallVowel('o')),
+        'っ' | 'ゎ' => return Some(Kana::Skip),
         _ => {}
     }
     KANA.split_whitespace().find_map(|pair| {

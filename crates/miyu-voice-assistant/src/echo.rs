@@ -34,6 +34,9 @@ const MOSTLY_ECHO_DB: f32 = 15.0;
 const SMOOTH: f32 = 0.1;
 /// 比这还轻的当安静，不算谁大谁小。
 const QUIET: f32 = 1e-7;
+/// 放的那一路没取走的最多留多少秒（审计 #123）：麦克风关着（半双工她说话那段、麦克风打不开）时没人取，只留最近的，
+/// 不一直涨，重开时也不把积压的旧声音一次喂给回声消除。
+const KEPT_SECONDS: usize = 2;
 
 /// 音箱放过、还没交给回声消除的声音。复制出去的是同一个。
 #[derive(Clone, Default)]
@@ -44,11 +47,13 @@ pub struct Played {
 #[derive(Default)]
 struct Queue {
     rate: u32,
-    samples: Vec<f32>,
+    /// 满了从前头丢：放声音的线程上叫，丢的时候不挪整段。
+    samples: VecDeque<f32>,
 }
 
 impl Played {
-    /// 交给音箱的旁听（[`voice_common::speaker::Speaker::tapped`]）：记下放了什么。采样率半路变了的，前面没取走的丢掉。
+    /// 交给音箱的旁听（[`voice_common::speaker::Speaker::tapped`]）：记下放了什么，只留最近 2 秒。采样率半路变了的，前面
+    /// 没取走的丢掉。
     #[must_use]
     pub fn tap(&self) -> Tap {
         let queue = Arc::clone(&self.queue);
@@ -58,13 +63,18 @@ impl Played {
                 queue.samples.clear();
                 queue.rate = rate;
             }
-            queue.samples.extend_from_slice(block);
+            queue.samples.extend(block.iter().copied());
+            let kept = usize::try_from(rate)
+                .unwrap_or(usize::MAX)
+                .saturating_mul(KEPT_SECONDS);
+            let over = queue.samples.len().saturating_sub(kept);
+            queue.samples.drain(..over);
         })
     }
 
     fn take(&self) -> (u32, Vec<f32>) {
         let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
-        (queue.rate, std::mem::take(&mut queue.samples))
+        (queue.rate, Vec::from(std::mem::take(&mut queue.samples)))
     }
 }
 

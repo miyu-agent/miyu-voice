@@ -333,7 +333,7 @@ mod platform {
             notification
                 .appname(&identity.name)
                 .summary(title)
-                .body(body)
+                .body(&escaped(body))
                 .hint(Hint::Category("im".to_string()));
             // 有头像的头像当图标，没有的不放图标。
             if let Some(avatar) = identity.avatar.as_ref().and_then(|path| path.to_str()) {
@@ -355,6 +355,13 @@ mod platform {
                 }
             }
         }
+    }
+
+    /// 正文转义成纯文字（审计 #124）：freedesktop 规范里正文是标记，`<Vec<T>>`、`&` 原样发会被当标签吞掉；标题不是标记，不转。
+    pub(super) fn escaped(body: &str) -> String {
+        body.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
     }
 }
 

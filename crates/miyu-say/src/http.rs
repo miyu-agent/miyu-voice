@@ -38,15 +38,7 @@ pub fn post_json(
         .send(body.to_string())
         .map_err(|error| EngineError::Failed(format!("Could not reach {}: {error}.", host(url))))?;
     let status = response.status();
-    let mut bytes = Vec::new();
-    response
-        .into_body()
-        .into_reader()
-        .take(LONGEST)
-        .read_to_end(&mut bytes)
-        .map_err(|error| {
-            EngineError::Failed(format!("The answer from {} broke off: {error}.", host(url)))
-        })?;
+    let bytes = read_capped(response.into_body().into_reader(), LONGEST, host(url))?;
     if !status.is_success() {
         let excerpt: String = String::from_utf8_lossy(&bytes)
             .chars()
@@ -61,8 +53,32 @@ pub fn post_json(
     Ok(bytes)
 }
 
-/// 网址的主机名，报错里说是哪家用。
+/// 读完回应，最多 `limit` 个字节；多读一个字节看超没超，超了的照实报错，不悄悄截成半段音频（审计 #126）。
+fn read_capped(reader: impl Read, limit: u64, host: &str) -> Result<Vec<u8>, EngineError> {
+    let mut bytes = Vec::new();
+    reader
+        .take(limit + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| {
+            EngineError::Failed(format!("The answer from {host} broke off: {error}."))
+        })?;
+    if bytes.len() as u64 > limit {
+        return Err(EngineError::Failed(format!(
+            "The answer from {host} is larger than {} MB.",
+            limit / (1024 * 1024)
+        )));
+    }
+    Ok(bytes)
+}
+
+/// 网址的主机名，报错里说是哪家用：去掉 `user:pass@` 那段，账号密码不进报错、日志（审计 #126）。
 fn host(url: &str) -> &str {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
-    rest.split('/').next().unwrap_or(rest)
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host)
 }
+
+#[cfg(test)]
+mod tests;

@@ -139,3 +139,30 @@ fn citation_marks_are_not_read() {
         "看官网的说明，一张图，还有 z.com。"
     );
 }
+
+/// 域名、版本号、小数里的英文句点不是句末（审计 #121）：`github.com` 被切成两次合成，前一半念「github」。
+#[test]
+fn dots_inside_domains_and_numbers_do_not_end_a_sentence() {
+    assert_eq!(
+        sentences("请访问 github.com 查看，版本 0.2.0，约 3.14。"),
+        ["请访问 github.com 查看，版本 0.2.0，约 3.14。"]
+    );
+    assert_eq!(
+        sentences("Open example.com now! Is it 1.5?Yes, it is fine."),
+        ["Open example.com now!", "Is it 1.5?", "Yes, it is fine."].map(String::from)
+    );
+    // 后面紧跟中文的英文句点照样是句末（模型在中文里写半角句点）。
+    assert_eq!(
+        sentences("装的是 v0.2.0.下一句也挺长的。"),
+        ["装的是 v0.2.0.", "下一句也挺长的。"].map(String::from)
+    );
+}
+
+/// 前后是标点、被 Markdown 当强调的下划线不把裸网址切开（审计 #121）。
+#[test]
+fn emphasis_inside_a_bare_url_does_not_cut_it() {
+    assert_eq!(
+        to_speech("见 https://e.com/_a_ 和 https://f.com/x/__b__ 的说明。"),
+        "见 e.com 和 f.com 的说明。"
+    );
+}

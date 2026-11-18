@@ -77,8 +77,14 @@ pub fn to_speech(markdown: &str) -> String {
         markdown,
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH,
     ) {
-        let text_outside_link = matches!(event, Event::Text(_) | Event::Code(_)) && link.is_none();
-        if !text_outside_link && !run.is_empty() {
+        // 强调、删除线的开头结尾不出字，不冲刷攒着的字：`https://e.com/_a_` 里的 `_a_` 会被当成强调（审计 #121）。
+        let keeps_run = matches!(event, Event::Text(_) | Event::Code(_)) && link.is_none()
+            || matches!(
+                event,
+                Event::Start(Tag::Emphasis | Tag::Strong | Tag::Strikethrough)
+                    | Event::End(TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough)
+            );
+        if !keeps_run && !run.is_empty() {
             out.push_str(&spoken_text(&run));
             run.clear();
         }
@@ -139,9 +145,10 @@ pub fn to_speech(markdown: &str) -> String {
 pub fn sentences(speech: &str) -> Vec<String> {
     let mut pieces = Vec::new();
     let mut current = String::new();
-    for c in speech.chars() {
+    let mut chars = speech.chars().peekable();
+    while let Some(c) = chars.next() {
         current.push(c);
-        if is_sentence_end(c) {
+        if is_sentence_end(c, chars.peek().copied()) {
             pieces.push(std::mem::take(&mut current));
         }
     }
@@ -169,8 +176,14 @@ pub fn sentences(speech: &str) -> Vec<String> {
     merged
 }
 
-fn is_sentence_end(c: char) -> bool {
-    matches!(c, '。' | '？' | '！' | '.' | '?' | '!' | '…')
+/// `c` 是不是句末，`next` 是它后面那个字。英文句点后面跟空白、到结尾或紧跟中文这些非 ASCII 字才算：域名
+/// （`github.com`）、版本号（`0.2.0`）、小数（`3.14`）里的点后面是字母数字，不切（审计 #121）。
+fn is_sentence_end(c: char, next: Option<char>) -> bool {
+    match c {
+        '。' | '？' | '！' | '?' | '!' | '…' => true,
+        '.' => next.is_none_or(|next| next.is_whitespace() || !next.is_ascii()),
+        _ => false,
+    }
 }
 
 /// 不念的字：表情符号、旗子、变体选择、零宽字符。

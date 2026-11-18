@@ -70,3 +70,22 @@ fn other_characters_and_unknown_syllables_are_refused() {
     assert!(encode("hey!", &vocab).unwrap_err().0.contains('!'));
     assert!(encode("你好", &vocab).unwrap_err().0.contains("vocabulary"));
 }
+
+/// 训令式、外来音的音节也能切（审计 #125）：拉丁字母写的 `tina`、`sisi` 不报错。
+#[test]
+fn kunrei_and_loanword_syllables_split() {
+    let vocab = vocabulary(&["t", "ī", "n", "ā", "s"]);
+    assert_eq!(encode("tina", &vocab).unwrap()[0], "t ī n ā @tina");
+    assert_eq!(encode("sisi", &vocab).unwrap()[0], "s ī s ī @sisi");
+}
+
+/// 小写元音和前一个音节拼（审计 #125）：ティ 是 ti 不是 te，フィ 是 fi，ウィ 是 wi；ヴ 认得。
+#[test]
+fn small_vowels_join_the_syllable_before() {
+    let vocab = vocabulary(&["t", "ī", "n", "ā", "f", "ēi", "w", "sh", "ē"]);
+    assert_eq!(encode("ティナ", &vocab).unwrap()[0], "t ī n ā @ティナ");
+    assert_eq!(encode("フィー", &vocab).unwrap()[0], "f ēi @フィー");
+    assert_eq!(encode("ヴァ", &vocab).unwrap()[0], "w ā @ヴァ");
+    assert_eq!(encode("ウィ", &vocab).unwrap()[0], "w ēi @ウィ");
+    assert_eq!(encode("シェ", &vocab).unwrap()[0], "sh ē @シェ");
+}

@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use voice_common::{audio, blobs, speakable};
 
 use crate::engine::{Audio, Engine, EngineError, Request, Voice};
+use crate::mp3;
 
 /// `tts.engine.synthesize` 一次最多收多少字。
 pub const LONGEST_PIECE: usize = 500;
@@ -123,7 +124,8 @@ fn hard_split(sentence: &str) -> Vec<String> {
         .collect()
 }
 
-/// 几段拼成一段：mp3 照字节接上；wav 读成样本接上、重写一个 wav（采样率要一样）。
+/// 几段拼成一段：mp3 去掉每段开头的 ID3 标签和 Xing/Info/VBRI 头帧再照字节接上（[`crate::mp3`]）；wav 读成样本接上、
+/// 重写一个 wav（采样率要一样）。
 ///
 /// # Errors
 ///
@@ -152,7 +154,10 @@ pub fn joined(mut parts: Vec<Audio>) -> Result<Audio, String> {
         }
         audio::write_wav(&samples, rate.unwrap_or(16_000))
     } else {
-        parts.into_iter().flat_map(|part| part.bytes).collect()
+        parts
+            .iter()
+            .flat_map(|part| mp3::bare(&part.bytes).iter().copied())
+            .collect()
     };
     Ok(Audio {
         bytes,

@@ -5,6 +5,8 @@
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
@@ -49,9 +51,26 @@ impl std::fmt::Display for InstallError {
 ///
 /// # Errors
 ///
-/// 连不上、对方回错。
+/// 连不上、超时、对方回错。
 pub fn fetch(url: &str) -> Result<impl Read, String> {
-    let response = ureq::get(url)
+    fetch_within(url, HEADERS_WITHIN, WHOLE_WITHIN)
+}
+
+/// 连上、收到回应头最多等多久。
+const HEADERS_WITHIN: Duration = Duration::from_secs(30);
+/// 整个下载最多多久：最大的模型 163 MB，慢的网也够。
+const WHOLE_WITHIN: Duration = Duration::from_mins(30);
+
+/// 照给的时限下（审计 #127：原来没有时限，对方连上了不回话的一直挂着）。
+fn fetch_within(url: &str, headers: Duration, whole: Duration) -> Result<impl Read, String> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(headers))
+        .timeout_recv_response(Some(headers))
+        .timeout_global(Some(whole))
+        .build()
+        .into();
+    let response = agent
+        .get(url)
         .call()
         .map_err(|error| format!("could not download {url}: {error}"))?;
     Ok(response.into_body().into_reader())
@@ -86,7 +105,7 @@ pub fn install_archive(
     let unpacked = unpack(&download, &staging, wanted);
     let _ = fs::remove_file(&download);
     unpacked?;
-    finish(&staging, dir)
+    finish(&staging, dir, wanted)
 }
 
 /// 单个文件（不是压缩包）装进目录 `dir`，名字是 `name`。
@@ -110,21 +129,57 @@ pub fn install_file(
     let _ = fs::remove_dir_all(&staging);
     fs::create_dir_all(&staging)?;
     fs::rename(&download, staging.join(name))?;
-    finish(&staging, dir)
+    finish(&staging, dir, &[name])
 }
 
-/// 下载用的临时文件、解开用的临时目录：都在 `dir` 旁边。
+/// 下载用的临时文件、解开用的临时目录：都在 `dir` 旁边，名字带进程号和序号（审计 #127）：常驻的和人敲的命令同时下同一份
+/// 时各写各的，不互踩。上次断在半路、一个钟头没动过的顺手删掉。
 fn side_paths(dir: &Path) -> io::Result<(PathBuf, PathBuf)> {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
     let parent = dir.parent().unwrap_or(Path::new("."));
     fs::create_dir_all(parent)?;
     let name = dir.file_name().map_or_else(
         || "model".into(),
         |name| name.to_string_lossy().into_owned(),
     );
+    remove_stale(parent, &name);
+    let own = format!(
+        "{name}.{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    );
     Ok((
-        parent.join(format!("{name}.download")),
-        parent.join(format!("{name}.partial")),
+        parent.join(format!("{own}.download")),
+        parent.join(format!("{own}.partial")),
     ))
+}
+
+/// 临时文件多久没动过算断在半路：下着、解着的一直在写。
+const STALE: Duration = Duration::from_hours(1);
+
+/// 删掉 `parent` 里 `name` 的、[`STALE`] 没动过的临时文件和目录（进程被杀、关机留下的）。
+fn remove_stale(parent: &Path, name: &str) {
+    let Ok(entries) = fs::read_dir(parent) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        let ours = file_name
+            .strip_prefix(name)
+            .and_then(|rest| rest.strip_prefix('.'))
+            .is_some_and(|rest| matches!(rest.rsplit('.').next(), Some("download" | "partial")));
+        let stale = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age > STALE);
+        if ours && stale {
+            let path = entry.path();
+            let _ = fs::remove_file(&path).or_else(|_| fs::remove_dir_all(&path));
+        }
+    }
 }
 
 fn check(got: String, expected: &str, download: &Path) -> Result<(), InstallError> {
@@ -138,7 +193,12 @@ fn check(got: String, expected: &str, download: &Path) -> Result<(), InstallErro
     })
 }
 
-fn finish(staging: &Path, dir: &Path) -> Result<(), InstallError> {
+/// 解好的临时目录改名成正式的。别人（另一个进程）在这期间装好了的，留着别人的、丢掉自己的（审计 #127）。
+fn finish(staging: &Path, dir: &Path, files: &[&str]) -> Result<(), InstallError> {
+    if ready(dir, files) {
+        let _ = fs::remove_dir_all(staging);
+        return Ok(());
+    }
     File::create(staging.join(DONE))?;
     let _ = fs::remove_dir_all(dir);
     fs::rename(staging, dir)?;

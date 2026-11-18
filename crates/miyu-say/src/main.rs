@@ -4,11 +4,13 @@
 //! `say` 工具（[`tool`]）。人敲 `miyu say …` 时核心把参数原样交过来：命令当本机的头连核心，经总线找到在跑的 `tts` 去合成、
 //! 去放（`voice_common::client`），自己不读 key、不碰声卡。
 
+mod cli;
 mod community;
 mod engine;
 mod http;
 mod mimo;
 mod minimax;
+mod mp3;
 mod openai;
 mod say;
 mod service;
@@ -22,13 +24,9 @@ use std::sync::Arc;
 use miyu_ext::{Extension, Method};
 use serde_json::{Value, json};
 
+use crate::cli::{Command, USAGE};
 use crate::service::Service;
 use voice_common::client::Client;
-
-const USAGE: &str = "usage: miyu say <text>            read it aloud in the current voice
-       miyu say -o FILE <text>    save it to FILE (.mp3 or .wav) instead
-       miyu say --file AUDIO      play an audio file
-       miyu say --voices          list the engine's voices";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -37,8 +35,18 @@ fn main() -> ExitCode {
             serve();
             ExitCode::SUCCESS
         }
-        Some(_) => match command(&args) {
-            Ok(()) => ExitCode::SUCCESS,
+        Some(_) => match cli::parse(&args) {
+            Ok(Command::Help) => {
+                println!("{USAGE}");
+                ExitCode::SUCCESS
+            }
+            Ok(asked) => match command(asked) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(why) => {
+                    eprintln!("miyu say: {why}");
+                    ExitCode::FAILURE
+                }
+            },
             Err(why) => {
                 eprintln!("miyu say: {why}");
                 ExitCode::FAILURE
@@ -96,38 +104,39 @@ fn serve() {
 }
 
 /// `miyu say …`：连核心，照参数调 `tts` 或者自己的 `voices`。
-fn command(args: &[String]) -> Result<(), String> {
+fn command(asked: Command) -> Result<(), String> {
     let home = std::env::var_os("MIYU_HOME")
         .map(PathBuf::from)
         .ok_or("MIYU_HOME is not set; run it as `miyu say`.")?;
     let mut core = Client::connect(&home, "miyu-say")?;
-    if args.iter().any(|arg| arg == "--voices") {
-        let answer = core.call(
-            "package.call",
-            &json!({"package": "say", "method": "voices"}),
-        )?;
-        for voice in answer["voices"].as_array().into_iter().flatten() {
-            println!(
-                "{}\t{}",
-                voice["id"].as_str().unwrap_or_default(),
-                voice["name"].as_str().unwrap_or_default()
-            );
+    match asked {
+        // `main` 连核心以前就印了用法。
+        Command::Help => Ok(()),
+        Command::Voices => voices(&mut core),
+        Command::File(file) => {
+            let path = std::fs::canonicalize(&file).map_err(|error| format!("{file}: {error}"))?;
+            let stored = core.call("blob.put", &json!({"path": path}))?;
+            play(&mut core, &json!({"audio": stored["blob"]}))
         }
-        return Ok(());
+        Command::Save { text, out } => save(&mut core, &text, Path::new(&out)),
+        Command::Play(text) => play(&mut core, &json!({"text": text})),
     }
-    if let Some(file) = option(args, "--file") {
-        let path = std::fs::canonicalize(file).map_err(|error| format!("{file}: {error}"))?;
-        let stored = core.call("blob.put", &json!({"path": path}))?;
-        return play(&mut core, &json!({"audio": stored["blob"]}));
+}
+
+/// 列引擎的音色，一行一个。
+fn voices(core: &mut Client) -> Result<(), String> {
+    let answer = core.call(
+        "package.call",
+        &json!({"package": "say", "method": "voices"}),
+    )?;
+    for voice in answer["voices"].as_array().into_iter().flatten() {
+        println!(
+            "{}\t{}",
+            voice["id"].as_str().unwrap_or_default(),
+            voice["name"].as_str().unwrap_or_default()
+        );
     }
-    let text = words(args);
-    if text.is_empty() {
-        return Err(USAGE.to_string());
-    }
-    match option(args, "-o") {
-        Some(out) => save(&mut core, &text, Path::new(out)),
-        None => play(&mut core, &json!({"text": text})),
-    }
+    Ok(())
 }
 
 fn play(core: &mut Client, params: &Value) -> Result<(), String> {
@@ -175,26 +184,4 @@ fn base64_decode(data: &str) -> Result<Vec<u8>, String> {
     base64::engine::general_purpose::STANDARD
         .decode(data)
         .map_err(|error| format!("The core sent bad base64: {error}."))
-}
-
-/// `--name value` 的 value。
-fn option<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
-    let at = args.iter().position(|arg| arg == name)?;
-    args.get(at + 1).map(String::as_str)
-}
-
-/// 不是选项、也不是选项的值的那些词，拼成要念的字。
-fn words(args: &[String]) -> String {
-    let mut out = Vec::new();
-    let mut skip = false;
-    for arg in args {
-        if skip {
-            skip = false;
-        } else if matches!(arg.as_str(), "-o" | "--file") {
-            skip = true;
-        } else if arg != "--voices" {
-            out.push(arg.as_str());
-        }
-    }
-    out.join(" ")
 }

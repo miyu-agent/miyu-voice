@@ -12,7 +12,7 @@ use voice_common::blobs;
 use voice_common::speaker::Speaker;
 
 use crate::filter;
-use crate::recognize::{Heard, LANGUAGES, Refused};
+use crate::recognize::{Heard, LANGUAGES, LONGEST_MS, Refused};
 use crate::record::{self, RecordError, Stopper};
 use crate::worker::Workers;
 
@@ -167,7 +167,7 @@ impl Service {
                 .map_err(refused)?;
             return Ok(answer(&heard, None));
         }
-        let pcm = audio::read_wav(&bytes).map_err(|why| MethodError::new("bad_audio", why.0))?;
+        let pcm = community_pcm(&bytes)?;
         if audio::silent(&pcm.samples) {
             return Err(silent_audio());
         }
@@ -228,6 +228,7 @@ impl Service {
             return self.workers.transcribe(pcm, language).map_err(refused);
         }
         let duration_ms = pcm.duration_ms();
+        within_limit(duration_ms)?;
         if !filter::long_enough(duration_ms) {
             return Ok(Heard {
                 text: String::new(),
@@ -304,6 +305,22 @@ fn nothing_heard(
         answer["ended"] = ended.into();
     }
     answer
+}
+
+/// 交社区引擎的 wav 解成样本（审计 #122）：先照头算时长，超了 [`LONGEST_MS`] 的回 `too_long`，不在常驻的主进程里整段解码。
+fn community_pcm(bytes: &[u8]) -> Result<Pcm, MethodError> {
+    let duration_ms =
+        audio::wav_duration_ms(bytes).map_err(|why| MethodError::new("bad_audio", why.0))?;
+    within_limit(duration_ms)?;
+    audio::read_wav(bytes).map_err(|why| MethodError::new("bad_audio", why.0))
+}
+
+/// 社区引擎那一路的时长上限，和自带的识别一样（审计 #122）。
+fn within_limit(duration_ms: u64) -> Result<(), MethodError> {
+    if duration_ms > LONGEST_MS {
+        return Err(refused(Refused::TooLong));
+    }
+    Ok(())
 }
 
 /// 整段是数字静音（施工 VO-26，核心 `reference/bus.md` 的 `silent_audio`）：多半是麦克风那头没声音，不是没说话。

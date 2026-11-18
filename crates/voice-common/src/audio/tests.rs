@@ -114,3 +114,17 @@ fn speech_is_heard_by_the_loudest_frame_not_the_opening_noise() {
         .collect();
     assert!(heard_speech(&edge, rate));
 }
+
+/// 坏样本（NaN、无穷）当 0 算响度（审计 #127）：一个 NaN 不让够响的那一帧算成没声音，一个无穷不让静音算成有人说话。
+#[test]
+fn nan_and_infinite_samples_count_as_zero() {
+    let mut loud = vec![0.5f32; 480];
+    loud[10] = f32::NAN;
+    assert!(
+        heard_speech(&loud, 16_000),
+        "one NaN does not hide the speech"
+    );
+    let mut quiet = vec![0.0f32; 480];
+    quiet[10] = f32::INFINITY;
+    assert!(!heard_speech(&quiet, 16_000), "one infinity is not speech");
+}

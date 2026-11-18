@@ -11,7 +11,7 @@
   - `vi-cache/sense-voice-int8-2024-07-17/`：语音输入的模型（跑一次 `miyu voice-input transcribe` 下好的那份）；
   - `va-cache/kws-zipformer-wenetspeech-3.3M-2024-01-01/`、`va-cache/silero-vad/`：助手的模型（`miyu listen wake-test 未有未有` 下好的）；
   - `kws-dl/x/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/test_wavs/`：唤醒词模型压缩包里带的样例；
-  - `model-dl/x/…/test_wavs/`：SenseVoice 压缩包里带的样例（`zh.wav`、`en.wav`）；
+  - `model-dl/x/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/test_wavs/`：SenseVoice 压缩包（和 `vi-cache` 同一版）里带的样例（`zh.wav`、`en.wav`）；
   - `silence60.wav`：60 秒 16 kHz 单声道静音（量 CPU 用）。
 - 本仓库 `cargo build --release`。
 

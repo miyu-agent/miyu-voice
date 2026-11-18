@@ -106,3 +106,14 @@ fn an_avatar_is_saved_once_per_version_and_none_means_no_icon() {
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// Linux 的通知正文是标记（freedesktop 规范）：`&`、`<`、`>` 转义了才照原样显示，不吞字（审计 #124）。
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn linux_notification_bodies_escape_markup() {
+    assert_eq!(
+        super::platform::escaped("Vec<T> & <b>x</b>"),
+        "Vec&lt;T&gt; &amp; &lt;b&gt;x&lt;/b&gt;"
+    );
+    assert_eq!(super::platform::escaped("好的"), "好的");
+}
