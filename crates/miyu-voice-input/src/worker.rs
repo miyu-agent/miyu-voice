@@ -10,7 +10,7 @@
 
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc;
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
@@ -26,16 +26,35 @@ use crate::recognize::{Heard, Recognizer, Refused};
 /// 子进程空闲多久自己退（设计 20 第五节「空闲一会儿卸掉」）。
 pub const IDLE: Duration = Duration::from_mins(5);
 
+/// 一次识别至少给多久（加载模型、认短的一句）；长的另加音频时长的两倍（审计 #120：以前不限，子进程卡死就一直等）。
+const ANSWER_WITHIN: Duration = Duration::from_mins(1);
+/// 收子进程时关了它的输入以后等它自己退多久，过了就杀。
+const EXIT_WITHIN: Duration = Duration::from_secs(2);
+
 /// 主进程这一头：要认时拉起子进程，子进程退了下次再拉。一次认一个。
 pub struct Workers {
     cache: PathBuf,
     running: Mutex<Option<Running>>,
+    /// 子进程照什么拉起：平常是本程序加 `recognize-worker`，测试换成卡死的程序。
+    command: Option<(PathBuf, Vec<String>)>,
+    /// 至少等多久（测试调短）。
+    within: Duration,
 }
 
 struct Running {
     child: Child,
     input: Option<BufWriter<ChildStdin>>,
-    output: BufReader<ChildStdout>,
+    /// 子进程回的一行行：另一个线程读，这边带期限地等（[`ANSWER_WITHIN`]）。
+    answers: mpsc::Receiver<String>,
+}
+
+/// 一次交换的结果。
+enum Exchange {
+    Answer(Result<Heard, Refused>),
+    /// 管道断了：子进程退了或者死了，再拉一个试。
+    Gone,
+    /// 过了期限还没回：卡住了，杀掉，不再试。
+    Stuck,
 }
 
 impl Workers {
@@ -45,6 +64,19 @@ impl Workers {
         Workers {
             cache,
             running: Mutex::new(None),
+            command: None,
+            within: ANSWER_WITHIN,
+        }
+    }
+
+    /// 测试用：子进程换成 `program args`，至少等 `within`（只有 Unix 上的测试用，拿 `sleep`、`true` 当子进程）。
+    #[cfg(all(test, unix))]
+    fn with_command(program: PathBuf, args: Vec<String>, within: Duration) -> Workers {
+        Workers {
+            cache: PathBuf::new(),
+            running: Mutex::new(None),
+            command: Some((program, args)),
+            within,
         }
     }
 
@@ -52,7 +84,7 @@ impl Workers {
     ///
     /// # Errors
     ///
-    /// 子进程认不了（太长、语言不对、模型坏了），或者拉不起来、半路死了。
+    /// 子进程认不了（太长、语言不对、模型坏了），或者拉不起来、半路死了、过了期限还没认完。
     pub fn transcribe(&self, pcm: &Pcm, language: &str) -> Result<Heard, Refused> {
         self.transcribe_wav(&audio::write_wav(&pcm.samples, pcm.rate), language)
     }
@@ -65,6 +97,11 @@ impl Workers {
     /// 同上；读不出来的 wav 子进程照 `engine` 回。
     pub fn transcribe_wav(&self, wav: &[u8], language: &str) -> Result<Heard, Refused> {
         let request = json!({"language": language, "wav": STANDARD.encode(wav)}).to_string();
+        // 16 kHz 单声道 16 位：一秒 32000 字节。
+        let audio_secs = u64::try_from(wav.len() / 32_000).unwrap_or(u64::MAX);
+        let within = self
+            .within
+            .saturating_add(Duration::from_secs(audio_secs.saturating_mul(2)));
         let mut running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
         for _ in 0..2 {
             if running.is_none() {
@@ -73,11 +110,15 @@ impl Workers {
             let Some(worker) = running.as_mut() else {
                 continue;
             };
-            match exchange(worker, &request) {
-                Some(answer) => return answer,
+            match exchange(worker, &request, within) {
+                Exchange::Answer(answer) => return answer,
                 // 退了或者死了：收掉，再拉一个。
-                None => {
+                Exchange::Gone => drop(running.take()),
+                Exchange::Stuck => {
                     drop(running.take());
+                    return Err(Refused::Engine(
+                        "The recognizer took too long and was stopped.".to_string(),
+                    ));
                 }
             }
         }
@@ -87,10 +128,17 @@ impl Workers {
     }
 
     fn spawn(&self) -> Result<Running, Refused> {
-        let program = std::env::current_exe()
-            .map_err(|error| Refused::Engine(format!("Cannot find this program: {error}.")))?;
+        let (program, args) = match &self.command {
+            Some((program, args)) => (program.clone(), args.clone()),
+            None => (
+                std::env::current_exe().map_err(|error| {
+                    Refused::Engine(format!("Cannot find this program: {error}."))
+                })?,
+                vec!["recognize-worker".to_string()],
+            ),
+        };
         let mut child = Command::new(program)
-            .arg("recognize-worker")
+            .args(args)
             .env("MIYU_CACHE_DIR", &self.cache)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -99,35 +147,61 @@ impl Workers {
             .map_err(|error| Refused::Engine(format!("Cannot start the recognizer: {error}.")))?;
         let (Some(input), Some(output)) = (child.stdin.take(), child.stdout.take()) else {
             let _ = child.kill();
+            let _ = child.wait();
             return Err(Refused::Engine("The recognizer has no pipes.".to_string()));
         };
+        let (lines, answers) = mpsc::channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(output).lines() {
+                let Ok(line) = line else { break };
+                if lines.send(line).is_err() {
+                    break;
+                }
+            }
+        });
         Ok(Running {
             child,
             input: Some(BufWriter::new(input)),
-            output: BufReader::new(output),
+            answers,
         })
     }
 }
 
 impl Drop for Running {
-    /// 主进程收掉子进程：关了它的标准输入，它读到头就退，等它退干净。
+    /// 主进程收掉子进程：关了它的标准输入，它读到头就退；[`EXIT_WITHIN`] 还没退的（卡死了）杀掉，再收。
     fn drop(&mut self) {
         drop(self.input.take());
+        let deadline = std::time::Instant::now() + EXIT_WITHIN;
+        while std::time::Instant::now() < deadline {
+            if matches!(self.child.try_wait(), Ok(Some(_)) | Err(_)) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let _ = self.child.kill();
         let _ = self.child.wait();
     }
 }
 
-/// 发一条、等一条；管道断了交回 `None`。
-fn exchange(worker: &mut Running, request: &str) -> Option<Result<Heard, Refused>> {
-    let input = worker.input.as_mut()?;
-    writeln!(input, "{request}").ok()?;
-    input.flush().ok()?;
-    let mut line = String::new();
-    if worker.output.read_line(&mut line).ok()? == 0 {
-        return None;
+/// 发一条、等一条，最多等 `within`。
+fn exchange(worker: &mut Running, request: &str, within: Duration) -> Exchange {
+    let Some(input) = worker.input.as_mut() else {
+        return Exchange::Gone;
+    };
+    if writeln!(input, "{request}")
+        .and_then(|()| input.flush())
+        .is_err()
+    {
+        return Exchange::Gone;
     }
-    let answer: Value = serde_json::from_str(&line).ok()?;
-    Some(decode(&answer))
+    match worker.answers.recv_timeout(within) {
+        Ok(line) => match serde_json::from_str::<Value>(&line) {
+            Ok(answer) => Exchange::Answer(decode(&answer)),
+            Err(_) => Exchange::Gone,
+        },
+        Err(mpsc::RecvTimeoutError::Timeout) => Exchange::Stuck,
+        Err(mpsc::RecvTimeoutError::Disconnected) => Exchange::Gone,
+    }
 }
 
 fn decode(answer: &Value) -> Result<Heard, Refused> {

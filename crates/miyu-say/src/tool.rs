@@ -9,6 +9,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use miyu_ext::{Call, Reply, Tool};
 use serde_json::{Value, json};
@@ -83,13 +84,12 @@ fn run(service: &Arc<Service>, args: &Value, call: &Call) -> Result<Reply, Strin
 
 /// `file_only`：存进工作区的 `audio/`，交回相对路径和时长。
 fn save(cwd: &str, audio: &Audio, duration_ms: Option<u64>) -> Result<String, String> {
-    let folder = Path::new(cwd).join(FOLDER);
     let name = format!(
         "say-{}.{}",
         short_hash(&audio.bytes),
         extension(&audio.media_type)
     );
-    store(&folder, &name, &audio.bytes)?;
+    store(Path::new(cwd), &name, &audio.bytes)?;
     let shown = Path::new(FOLDER).join(&name);
     Ok(match duration_ms {
         Some(ms) => format!("Saved {} ({}).", shown.display(), seconds(ms)),
@@ -127,15 +127,33 @@ fn extension(media_type: &str) -> &'static str {
     }
 }
 
-/// 写进 `folder/name`：先写同目录下的临时文件、再改名。
-fn store(folder: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
-    fs::create_dir_all(folder).map_err(|error| format!("Cannot create {FOLDER}/: {error}."))?;
+/// 写进工作区的 `audio/name`：先写同目录下的临时文件、再改名。
+///
+/// 审计 #119：`audio/` 照真实位置核对还在工作区里（工作区里放一个指到外面的 `audio` 链接，以前就顺着写到外面去）；
+/// 临时文件名带进程号和进程里的序号（以前只带进程号，同一进程里两次存同一段声音撞名，失败的那个把对方的临时文件删了），
+/// 只删自己建出来的那一个。
+fn store(workspace: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let home = fs::canonicalize(workspace)
+        .map_err(|error| format!("Cannot open the workspace: {error}."))?;
+    let folder = workspace.join(FOLDER);
+    fs::create_dir_all(&folder).map_err(|error| format!("Cannot create {FOLDER}/: {error}."))?;
     let real =
-        fs::canonicalize(folder).map_err(|error| format!("Cannot open {FOLDER}/: {error}."))?;
+        fs::canonicalize(&folder).map_err(|error| format!("Cannot open {FOLDER}/: {error}."))?;
+    if !real.starts_with(&home) {
+        return Err(format!("{FOLDER}/ leads outside the workspace."));
+    }
     let target = real.join(name);
-    let temp = real.join(format!(".{name}.{}.tmp", std::process::id()));
-    let written = fs::File::create_new(&temp)
-        .and_then(|mut file| file.write_all(bytes).and_then(|()| file.sync_all()))
+    let temp = real.join(format!(
+        ".{name}.{}.{}.tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let mut file =
+        fs::File::create_new(&temp).map_err(|error| format!("Cannot save the audio: {error}."))?;
+    let written = file
+        .write_all(bytes)
+        .and_then(|()| file.sync_all())
         .and_then(|()| fs::rename(&temp, &target));
     if let Err(error) = written {
         let _ = fs::remove_file(&temp);

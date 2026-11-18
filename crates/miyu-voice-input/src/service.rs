@@ -197,6 +197,13 @@ impl Service {
             }
             RecordError::NoMicrophone(why) => MethodError::new("no_microphone", why),
         })?;
+        // 开始听以前就叫停了（审计 #120）：什么都没录，照没听清回，不是麦克风没声音。
+        if pcm.samples.is_empty() {
+            return Ok(
+                json!({"text": "", "language": language, "duration_ms": 0, "clear": false,
+                             "ended": ended.as_str()}),
+            );
+        }
         if audio::silent(&pcm.samples) {
             return Err(silent_audio());
         }

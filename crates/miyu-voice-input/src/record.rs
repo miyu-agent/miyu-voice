@@ -39,13 +39,30 @@ pub struct Stopper {
 }
 
 impl Stopper {
-    /// 叫停；交回有没有在录的。
+    /// 叫停；交回有没有在录的。从拿到麦克风锁起就算在录（开麦、响开始那一声的时候也算），这时叫停，一开始听就停。
     pub fn stop(&self) -> bool {
         let recording = self.recording.load(Ordering::SeqCst);
         if recording {
             self.flag.store(true, Ordering::SeqCst);
         }
         recording
+    }
+
+    /// 开始录这一次：清掉上一次的叫停，记成在录；交回的丢掉就记成不在录（审计 #120：以前到开始听才记成在录、还在那时清掉
+    /// 叫停，开麦、响开始那一声的那几百毫秒里按停就丢了）。
+    fn begin(&self) -> Recording<'_> {
+        self.flag.store(false, Ordering::SeqCst);
+        self.recording.store(true, Ordering::SeqCst);
+        Recording(self)
+    }
+}
+
+/// [`Stopper::begin`] 交回的：丢掉以前算在录。
+struct Recording<'a>(&'a Stopper);
+
+impl Drop for Recording<'_> {
+    fn drop(&mut self) {
+        self.0.recording.store(false, Ordering::SeqCst);
     }
 }
 
@@ -68,6 +85,7 @@ pub fn record(
             "The microphone lock folder is not safe to use: {why}."
         )),
     })?;
+    let _recording = stopper.begin();
     // 开麦克风的同时把音箱开着（声卡醒过来），开不了的照样录、不响。
     let awake = chimes.and_then(|speaker| speaker.awake().ok());
     let mic = Mic::open(device).map_err(RecordError::NoMicrophone)?;
@@ -98,8 +116,25 @@ fn listen(
     max_ms: u64,
     stopper: &Stopper,
 ) -> Result<(Pcm, Ended), RecordError> {
-    stopper.flag.store(false, Ordering::SeqCst);
-    stopper.recording.store(true, Ordering::SeqCst);
+    listen_from(
+        || mic.failure(),
+        || mic.chunks.recv_timeout(Duration::from_millis(50)).ok(),
+        rate,
+        silence_ms,
+        max_ms,
+        stopper,
+    )
+}
+
+/// [`listen`] 的本体：声音从 `next` 来（等一小会儿，没有的交回空），`failure` 说设备半路出了什么错。测试交假的。
+fn listen_from(
+    failure: impl Fn() -> Option<String>,
+    mut next: impl FnMut() -> Option<Vec<f32>>,
+    rate: u32,
+    silence_ms: u64,
+    max_ms: u64,
+    stopper: &Stopper,
+) -> Result<(Pcm, Ended), RecordError> {
     let frame = usize::try_from(u64::from(rate) * FRAME_MS / 1000)
         .unwrap_or(480)
         .max(1);
@@ -110,11 +145,10 @@ fn listen(
         if stopper.flag.load(Ordering::SeqCst) {
             break Ended::Stop;
         }
-        if let Some(why) = mic.failure() {
-            stopper.recording.store(false, Ordering::SeqCst);
+        if let Some(why) = failure() {
             return Err(RecordError::NoMicrophone(why));
         }
-        if let Ok(chunk) = mic.chunks.recv_timeout(Duration::from_millis(50)) {
+        if let Some(chunk) = next() {
             samples.extend(chunk);
         }
         while samples.len() - fed >= frame {
@@ -124,6 +158,8 @@ fn listen(
             fed += frame;
         }
     };
-    stopper.recording.store(false, Ordering::SeqCst);
     Ok((Pcm { samples, rate }, ended))
 }
+
+#[cfg(test)]
+mod tests;
