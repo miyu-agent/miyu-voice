@@ -3,6 +3,8 @@
 
 [package]
 version = "0.1.0"
+# 最低要求的 Miyu 版本。旧版本的核心读到这一行，会先提示需要更新 Miyu，而不是报告不认识的设置写法。
+miyu = "2026.11.0-rc.2.4"
 targets = ["linux-x86_64", "macos-aarch64", "windows-x86_64"]
 protocol = [1, 1]
 name = { en = "Say", zh = "朗读", ja = "読み上げ" }

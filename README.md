@@ -74,4 +74,4 @@ Apache-2.0、MIT、MPL-2.0 都可以和本仓库的 AGPL-3.0 一起发布。MPL-
 
 ## 许可证
 
-AGPL-3.0-or-later。这几个包目前还没有发布正式版本。
+AGPL-3.0-or-later。
