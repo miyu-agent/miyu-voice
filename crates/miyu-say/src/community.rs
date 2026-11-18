@@ -96,15 +96,19 @@ pub fn voices_in(answer: &Value) -> Vec<Voice> {
         .collect()
 }
 
-/// 按句切成一块块，每块不超过 [`LONGEST_PIECE`] 个字；一句就超过的硬切。
+/// 按句切成一块块，每块不超过 [`LONGEST_PIECE`] 个字；一句就超过的硬切。同一块里前一句以拉丁字母、数字或半角标点
+/// 结尾的，两句之间补一个空格（英文不连成 `green.Ship`），中文句子之间不加。
 #[must_use]
 pub fn pieces(text: &str) -> Vec<String> {
     let mut pieces: Vec<String> = Vec::new();
     let mut current = String::new();
     for sentence in speakable::sentences(text) {
-        for part in hard_split(&sentence) {
-            if current.chars().count() + part.chars().count() > LONGEST_PIECE {
+        for (index, part) in hard_split(&sentence).into_iter().enumerate() {
+            let gap = index == 0 && current.chars().last().is_some_and(|c| c.is_ascii_graphic());
+            if current.chars().count() + usize::from(gap) + part.chars().count() > LONGEST_PIECE {
                 pieces.push(std::mem::take(&mut current));
+            } else if gap {
+                current.push(' ');
             }
             current.push_str(&part);
         }

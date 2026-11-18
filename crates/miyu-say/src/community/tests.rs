@@ -27,6 +27,23 @@ fn long_text_is_cut_at_sentences_into_pieces_the_engine_takes() {
 }
 
 #[test]
+fn english_sentences_keep_a_space_between_them_chinese_ones_do_not() {
+    assert_eq!(
+        pieces("The build is green. Ship it to everyone now!  Done at 3.14 pm."),
+        ["The build is green. Ship it to everyone now! Done at 3.14 pm."]
+    );
+    assert_eq!(
+        pieces("构建已经通过了。马上发给大家吧！"),
+        ["构建已经通过了。马上发给大家吧！"]
+    );
+    assert_eq!(
+        pieces("版本号是 0.2.0. 接着发给大家吧。"),
+        ["版本号是 0.2.0. 接着发给大家吧。"],
+        "a sentence ending in latin punctuation is followed by a space"
+    );
+}
+
+#[test]
 fn one_sentence_longer_than_a_piece_is_cut_hard() {
     let text = "啊".repeat(LONGEST_PIECE * 2 + 3);
     let cut = pieces(&text);
