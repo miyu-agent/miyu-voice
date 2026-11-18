@@ -147,17 +147,17 @@ pub fn text(notice: &Notice, language: &str, name: &str) -> (String, String) {
         Notice::ConversationOn => (
             pick("对话开着", "会話中", "Conversation on"),
             pick(
-                "直接说；30 秒不说话就结束，miyu listen 也能关",
+                "直接说话即可；30 秒没有说话会自动结束，也可以运行 miyu listen 结束",
                 "そのまま話してください。30 秒黙ると終了、miyu listen でも終了",
-                "Just talk; it ends after 30 s of quiet, or miyu listen ends it",
+                "Just talk; it ends after 30 s of quiet, or run miyu listen to end it",
             ),
         ),
         Notice::ConversationOff => (
             pick("对话结束", "会話を終了しました", "Conversation ended"),
             pick(
-                "叫她的名字，或者 miyu listen 再开",
+                "说出唤醒词，或者运行 miyu listen 重新开始",
                 "名前を呼ぶか、miyu listen でまた始められます",
-                "Say her name, or miyu listen to start again",
+                "Say the wake word, or run miyu listen to start again",
             ),
         ),
         Notice::Heard(heard) => (

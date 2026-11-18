@@ -1,28 +1,28 @@
-# 语音助手（设计：核心仓库 docs/designs/20-语音.md 第九节）：像 Siri 那样常驻后台，叫她的名字就能说。经总线调 stt、tts，
-# 不认那两个包的包名；依赖它们，装它就是装全套（设计 20 第二节）。
+# 语音助手（设计见核心仓库 docs/designs/20-语音.md 第九节）：像 Siri 一样在后台常驻，说出唤醒词就能和 AI 对话。它通过总线调用 stt、tts，
+# 不依赖那两个包的包名；它依赖这两个包，所以安装它就会安装全套（设计 20 第二节）。
 
 [package]
 version = "0.1.0"
 targets = ["linux-x86_64", "macos-aarch64", "windows-x86_64"]
 protocol = [1, 1]
 name = { en = "Voice assistant", zh = "语音助手", ja = "音声アシスタント" }
-summary = { en = "Runs in the background: say her name and talk", zh = "常驻后台：叫她的名字就能说话", ja = "バックグラウンドで待機：名前を呼べば話せます" }
+summary = { en = "Runs in the background: say the wake word and talk to the AI", zh = "在后台常驻，说出唤醒词就能和 AI 对话", ja = "バックグラウンドで待機：名前を呼べば話せます" }
 upstream = "https://github.com/miyu-agent/miyu-voice"
 icon = "audio-lines"
 # 配置键是 voice-assistant.*（同包编号，写明了不随编号变；程序照这个前缀读）。
 prefix = "voice-assistant"
 
-# miyu listen：开关和她的对话，miyu listen on、off 写明（项目主人 2026-11-10 定：装着、没停用就一直听唤醒词，开关管的是对话）。
+# miyu listen 开始或结束和 AI 的对话，也可以写明 miyu listen on、off。包在安装并启用时一直监听唤醒词，这个命令只控制对话。
 [command]
 name = "listen"
 program = "miyu-voice-assistant"
-about = { en = "Start or end a conversation with her", zh = "开始、结束和她的对话", ja = "会話を始める・終える" }
+about = { en = "Start or end a conversation with the AI", zh = "开始或结束和 AI 的对话", ja = "会話を始める・終える" }
 
 [process]
 args = ["serve"]
 start = "always"
 # audio.record：听唤醒词；audio.play：提示音；packages.call：调 stt、tts；act_for_external：在 voice 场所里替主人说话
-# （核心 VA-1：voice 平台的 owner 天然是主人）；events.read：订阅会话，一句句念她的回答；sessions.drive：开口就打断时
+# （核心 VA-1：voice 平台的 owner 天然是主人）；events.read：订阅会话，一句一句念出 AI 的回答；sessions.drive：开口打断时
 # 打断这一轮（session.interrupt）。
 capabilities = ["audio.record", "audio.play", "packages.call", "act_for_external", "events.read", "sessions.drive"]
 
@@ -52,7 +52,7 @@ default = 0.25
 layers = ["system"]
 applies = "program_start"
 name = { en = "Wake threshold", zh = "唤醒门槛", ja = "ウェイクのしきい値" }
-description = { en = "Lower wakes more easily, and more often by mistake.", zh = "越低越容易叫醒，也越容易误醒。", ja = "低いほど反応しやすく、誤反応も増えます。" }
+description = { en = "A lower value wakes more easily, and also wakes by mistake more often.", zh = "数值越低越容易唤醒，误唤醒也会越多。", ja = "低いほど反応しやすく、誤反応も増えます。" }
 
 [settings.microphone]
 type = "text"
@@ -62,12 +62,12 @@ choices_from = "microphones"
 layers = ["system"]
 applies = "program_start"
 name = { en = "Microphone", zh = "麦克风", ja = "マイク" }
-description = { en = "The device name. Empty: the system default.", zh = "设备名。不填用系统默认的。", ja = "デバイス名。空欄はシステムの既定。" }
+description = { en = "The device name. If you leave it empty, the system's default input is used.", zh = "麦克风的设备名。不填写时使用系统默认的输入设备。", ja = "デバイス名。空欄はシステムの既定。" }
 
 [settings.full_duplex]
 type = "bool"
 default = true
 layers = ["system"]
 applies = "now"
-name = { en = "Interrupt her by speaking", zh = "说话时可以打断她", ja = "話しかけて止める" }
-description = { en = "Start talking while she speaks and she stops. Off: she listens only after she has finished.", zh = "她说话时你一开口她就停。关掉以后，她说完才听你的。", ja = "話している途中で話しかけると止まります。オフ：話し終わってから聞きます。" }
+name = { en = "Interrupt the AI by speaking", zh = "说话时可以打断 AI", ja = "話しかけて止める" }
+description = { en = "If you start talking while the AI is speaking, it stops. When this is off, the AI listens only after it has finished speaking.", zh = "AI 正在说话时，只要你开口，AI 就会停下。关闭之后，AI 说完才会开始听你说话。", ja = "話している途中で話しかけると止まります。オフ：話し終わってから聞きます。" }

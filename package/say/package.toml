@@ -1,12 +1,12 @@
-# 朗读（设计：核心仓库 docs/designs/20-语音.md 第六节）。云端合成（MiniMax、MiMo、OpenAI 兼容），在总线上提供 tts；
-# 朗读按钮、自动朗读、语音助手、她的 say 工具都经它出声。
+# 朗读（设计见核心仓库 docs/designs/20-语音.md 第六节）。这个包用云端合成（MiniMax、MiMo、OpenAI 兼容）在总线上提供 tts；
+# 朗读按钮、自动朗读、语音助手和 AI 的 say 工具都通过它发声。
 
 [package]
 version = "0.1.0"
 targets = ["linux-x86_64", "macos-aarch64", "windows-x86_64"]
 protocol = [1, 1]
 name = { en = "Say", zh = "朗读", ja = "読み上げ" }
-summary = { en = "Reads replies aloud with a cloud voice; she can speak and send voice messages", zh = "用云端的声音把回复念出来；她能说话、能发语音", ja = "クラウドの声で返信を読み上げます。AI が話したり音声メッセージを送ったりできます" }
+summary = { en = "Reads replies aloud with a cloud voice; the AI can also speak and send voice messages", zh = "用云端的语音合成把回复念出来，AI 也可以说话和发送语音消息", ja = "クラウドの声で返信を読み上げます。AI が話したり音声メッセージを送ったりできます" }
 upstream = "https://github.com/miyu-agent/miyu-voice"
 icon = "volume-2"
 # 配置键是 say.*（同包编号，写明了不随编号变）。
@@ -16,7 +16,7 @@ prefix = "say"
 [command]
 name = "say"
 program = "miyu-say"
-about = { en = "Read text aloud", zh = "把字念出来", ja = "文字を読み上げる" }
+about = { en = "Read text aloud", zh = "把文字念出来", ja = "文字を読み上げる" }
 
 [process]
 args = ["serve"]
@@ -43,7 +43,7 @@ default = "minimax"
 layers = ["system"]
 applies = "now"
 name = { en = "Engine", zh = "引擎", ja = "エンジン" }
-description = { en = "Which service turns text into speech: a built-in one, or an installed package that plugs into tts.engine, such as DeepSeek.", zh = "用哪家把字念出来：内置的几家，或者装着的、接进 tts.engine 的包，例如 DeepSeek。", ja = "どのサービスで読み上げるか：内蔵のもの、または tts.engine に接続するインストール済みパッケージ（DeepSeek など）。" }
+description = { en = "Choose the service that turns text into speech: a built-in one, or an installed package that plugs into tts.engine, such as DeepSeek.", zh = "选择由哪个服务把文字念出来：可以是内置的服务，也可以是已安装、接入 tts.engine 的软件包，例如 DeepSeek。", ja = "どのサービスで読み上げるか：内蔵のもの、または tts.engine に接続するインストール済みパッケージ（DeepSeek など）。" }
 
 [settings.voice]
 type = "text"
@@ -51,7 +51,7 @@ max = 200
 layers = ["system"]
 applies = "now"
 name = { en = "Default voice", zh = "默认音色", ja = "既定の声" }
-description = { en = "The engine's voice id. Empty: the engine's default.", zh = "引擎的音色编号。不填用引擎的默认音色。", ja = "エンジンの声の ID。空欄はエンジンの既定。" }
+description = { en = "The engine's voice id. If you leave it empty, the engine's default voice is used.", zh = "引擎的音色编号。不填写时使用引擎的默认音色。", ja = "エンジンの声の ID。空欄はエンジンの既定。" }
 
 [settings.speed]
 type = "number"
@@ -63,7 +63,7 @@ default = 1.0
 layers = ["system"]
 applies = "now"
 name = { en = "Speed", zh = "语速", ja = "話す速さ" }
-description = { en = "0.5 to 2. Not every engine takes it.", zh = "0.5 到 2。不是每家都认。", ja = "0.5〜2。対応しないエンジンもあります。" }
+description = { en = "From 0.5 to 2. Not every engine supports changing the speed.", zh = "范围是 0.5 到 2。并不是所有引擎都支持调整语速。", ja = "0.5〜2。対応しないエンジンもあります。" }
 
 [settings.personas]
 type = "list"
@@ -72,7 +72,7 @@ title = "voice"
 layers = ["system"]
 applies = "now"
 name = { en = "Voices per persona", zh = "每个人格的音色", ja = "ペルソナごとの声" }
-description = { en = "A persona not listed uses the default voice. Clone a real person's voice only with their consent.", zh = "没列的人格用默认音色。克隆真人的声音要本人同意。", ja = "載っていないペルソナは既定の声。実在の人の声の複製は本人の同意が必要です。" }
+description = { en = "Personas that are not listed use the default voice. Clone a real person's voice only with their consent.", zh = "没有列出的人格使用默认音色。克隆真人的声音必须得到本人同意。", ja = "載っていないペルソナは既定の声。実在の人の声の複製は本人の同意が必要です。" }
 
 [settings.personas.fields.persona]
 type = "persona"
@@ -103,7 +103,7 @@ default = "mainland"
 layers = ["system"]
 applies = "now"
 name = { en = "MiniMax region", zh = "MiniMax 地区", ja = "MiniMax の地域" }
-description = { en = "mainland: api.minimaxi.com. international: api.minimax.io. Keys don't work across regions.", zh = "mainland 国内（api.minimaxi.com），international 国际（api.minimax.io）。两边的 key 不通用。", ja = "mainland は中国本土（api.minimaxi.com）、international は国際版（api.minimax.io）。キーは共通ではありません。" }
+description = { en = "mainland: api.minimaxi.com. international: api.minimax.io. Keys don't work across regions.", zh = "mainland 是国内版（api.minimaxi.com），international 是国际版（api.minimax.io）。两个地区的 key 不能通用。", ja = "mainland は中国本土（api.minimaxi.com）、international は国際版（api.minimax.io）。キーは共通ではありません。" }
 
 [settings.minimax.key]
 type = "secret"
@@ -118,7 +118,7 @@ default = "speech-2.8-turbo"
 layers = ["system"]
 applies = "now"
 name = { en = "MiniMax model", zh = "MiniMax 的模型", ja = "MiniMax のモデル" }
-description = { en = "speech-2.8-turbo is fast and cheap; speech-2.8-hd sounds better.", zh = "speech-2.8-turbo 快、便宜；speech-2.8-hd 音质更好。", ja = "speech-2.8-turbo は速くて安価、speech-2.8-hd は高音質。" }
+description = { en = "speech-2.8-turbo is fast and cheap; speech-2.8-hd sounds better.", zh = "speech-2.8-turbo 速度快、价格低；speech-2.8-hd 音质更好。", ja = "speech-2.8-turbo は速くて安価、speech-2.8-hd は高音質。" }
 
 [settings.mimo]
 name = { en = "MiMo (Xiaomi)", zh = "MiMo（小米）", ja = "MiMo（Xiaomi）" }
@@ -148,14 +148,14 @@ default = "https://api.openai.com/v1"
 layers = ["system"]
 applies = "now"
 name = { en = "Address", zh = "地址", ja = "アドレス" }
-description = { en = "Up to /v1, e.g. http://127.0.0.1:9880/v1 for a local server.", zh = "写到 /v1 为止，本机服务例如 http://127.0.0.1:9880/v1。", ja = "/v1 まで。ローカルなら例えば http://127.0.0.1:9880/v1。" }
+description = { en = "Write the address up to /v1. For a local server, for example: http://127.0.0.1:9880/v1.", zh = "地址写到 /v1 为止。如果使用本机服务，可以写成 http://127.0.0.1:9880/v1。", ja = "/v1 まで。ローカルなら例えば http://127.0.0.1:9880/v1。" }
 
 [settings.openai.key]
 type = "secret"
 layers = ["system"]
 applies = "now"
 name = { en = "API key", zh = "API key", ja = "API キー" }
-description = { en = "Leave empty for a local server that needs none.", zh = "本机不要 key 的服务留空。", ja = "キー不要のローカルサーバーなら空欄。" }
+description = { en = "Leave it empty if your local server does not need a key.", zh = "如果本机服务不需要 key，这里留空即可。", ja = "キー不要のローカルサーバーなら空欄。" }
 
 [settings.openai.model]
 type = "text"

@@ -1,34 +1,77 @@
 # Miyu 语音
 
-Miyu 的三个语音包，都是可选的：没装就没有，任何界面上都看不到语音的东西。设计在核心仓库的 `docs/designs/20-语音.md`。
+这个仓库里是 Miyu 的三个语音包。三个包都是可选的：如果你没有安装，Miyu 的任何界面上都不会出现和语音有关的内容。
 
-| 包 | 装上以后 | 命令 |
+| 包 | 安装之后可以做什么 | 命令 |
 |---|---|---|
-| `voice-input` | 在这台电脑上把说的话转成字（SenseVoice，CPU 就够）：终端、网页输入框的麦克风，聊天里的语音消息转成字。用这台电脑的麦克风录（终端）时，开始听响上扬的一声、停止听响下沉的一声，设置里「语音输入提示音」能关。录到的整段是数字静音（麦克风被静音、没插好、系统默认输入没声音）时报 `silent_audio`，不当成「没听清」 | `miyu voice-input` |
-| `say` | 用云端的声音（MiniMax、MiMo、OpenAI 兼容）把回复念出来；她能说话、能发语音 | `miyu say` |
-| `voice-assistant` | 像 Siri 那样常驻后台，叫她的名字就能说；装它会带上另外两个 | `miyu listen` |
+| `voice-input`（语音输入） | 在这台电脑上把你说的话转成文字，用于终端和网页输入框的麦克风按钮，以及聊天里的语音消息。识别在本机的 CPU 上运行，使用 SenseVoice 模型。 | `miyu voice-input` |
+| `say`（朗读） | 用云端的语音合成（MiniMax、MiMo 或兼容 OpenAI 接口的服务）把回复念出来。AI 也可以主动说话和发送语音消息。 | `miyu say` |
+| `voice-assistant`（语音助手） | 像 Siri 一样在后台常驻，你说出唤醒词就可以和 AI 对话。安装它时会同时安装另外两个包。 | `miyu listen` |
+
+安装：
 
 ```sh
-miyu pkg install voice-assistant   # 全套
-miyu pkg install voice-input       # 只要语音转字
+miyu pkg install voice-assistant   # 安装全部三个包
+miyu pkg install voice-input       # 只安装语音输入
 ```
 
-语音助手装着、没停用，核心开着就一直听唤醒词（默认「未有未有」「密友密友」「miyumiyu」「みゆみゆ」，配置页能改，`miyu listen wake-test <词>` 先试）；不想让它听就在软件包里停用它。`miyu listen` 开关和她的对话（`miyu listen on`、`off` 写明）：开了同喊了唤醒词，响一声就说；关了响另一声，她还在说的停下。对话也会自己结束：叫醒了 30 秒没开口、她说完 30 秒没再说，响结束那一声、弹一条「对话结束」；这之前接着说不用再叫。一路弹系统通知：在听、认成了什么、在想、她说到哪、没听清、哪一步出了错（Linux 上一直是同一条跟着变；Windows、macOS 换不掉上一条，只弹认成了什么、答完、出错）。她说话时你一开口她就停，外放也行：助手把音箱正在放的声音从麦克风收到的里面减掉（回声消除），不把她自己的声音当成你说的；音箱开得比你的声音响很多时听不出你开口，这时喊不动她，等她说完或者 `miyu listen off`。不想被打断的在配置页关掉「说话时可以打断她」，她说完才听你的。快捷键：Windows、macOS 由托盘程序注册；Linux 的 Wayland 不让程序自己抢全局键，在桌面环境的快捷键设置里绑一条 `miyu listen`。
+## 语音输入
 
-麦克风在配置页里从下拉选，不选用系统默认的。Linux 上有声音服务（PipeWire、PulseAudio）的，收音、放声音都经它（走它的 PulseAudio 接口，不用另装库），下拉里列的就是系统声音设置里的那几个输入，别的程序照样能用同一个麦克风；没有声音服务的直接用 ALSA 的声卡。
+在终端里用麦克风说话时，开始听会播放一声上扬的提示音，停止听会播放一声下沉的提示音。如果不需要提示音，可以在设置里关闭 `语音输入提示音`。
 
-想换引擎的不用换包：社区包照 `stt.engine`、`tts.engine` 接进来（设计 `67-总线.md`），装上以后在配置页里选它：语音输入、朗读的「引擎」下拉里直接多一项，写包的名字，和本机的、内置的几家排在一起（选了社区引擎的语音输入不下 163 MB 的本机模型）。长的字朗读这边按句切开、一句一句交给它，拼回一段。
+如果整段录音完全没有声音（例如麦克风被静音、没有插好，或者系统默认的输入设备没有声音），语音输入会报告 `silent_audio`，而不是提示没听清。此时建议检查麦克风，或者在设置的 `麦克风` 下拉里换一个输入设备。
 
-## 第三方
+## 语音助手
 
-| 用到的 | 怎么用 | 许可证 |
+语音助手在安装并启用之后，只要核心在运行，就会一直监听唤醒词。默认的唤醒词是 `未有未有`、`密友密友`、`miyumiyu` 和 `みゆみゆ`，你可以在设置页修改。想先确认某个词能不能被听出来，可以运行 `miyu listen wake-test <唤醒词>`。如果不想让语音助手监听，在软件包里停用它即可。
+
+`miyu listen` 用来开始或结束一次对话，也可以写明 `miyu listen on` 或 `miyu listen off`：
+
+- 开始对话的效果和说出唤醒词一样，提示音响过之后就可以说话；
+- 结束对话时会播放另一声提示音，如果 AI 还在说话，也会停下来。
+
+对话也会自动结束：如果唤醒之后 30 秒内你没有开口，或者 AI 说完之后 30 秒内你没有再说话，语音助手会播放结束的提示音，并弹出一条 `对话结束` 通知。在对话结束之前，你可以直接接着说，不需要再说唤醒词。
+
+对话过程中，语音助手会用系统通知显示当前的状态：正在听、识别出了什么、正在思考、AI 说到了哪里、没听清，以及哪一步出了错。在 Linux 上，这些状态显示在同一条通知里并随时更新。Windows 和 macOS 不能替换已经弹出的通知，所以只会弹出识别结果、回答完成和出错这几条。
+
+**AI 说话的时候，你一开口它就会停下，用外放音箱时也一样。** 这是因为语音助手会从麦克风收到的声音里减去音箱正在播放的声音（回声消除），所以不会把 AI 自己的声音当成你说的话。但是，如果音箱的音量比你的声音大很多，语音助手就听不出你开口了。此时可以等 AI 说完，或者运行 `miyu listen off`。如果你不希望被打断，可以在设置里关闭 `说话时可以打断 AI`，这样 AI 说完之后才会开始听你说话。
+
+快捷键的设置方法因系统而异：
+
+- Windows 和 macOS：由系统托盘程序注册快捷键。
+- Linux：Wayland 不允许程序自己注册全局快捷键，所以需要在桌面环境的快捷键设置里添加一条运行 `miyu listen` 的快捷键。
+
+## 选择麦克风
+
+语音输入和语音助手都可以在设置的 `麦克风` 下拉里选择麦克风；不选择时使用系统默认的输入设备。
+
+- Linux：如果系统里有声音服务（PipeWire 或 PulseAudio），录音和播放都通过声音服务进行（使用它的 PulseAudio 接口，不需要另外安装库）。下拉里列出的就是系统声音设置里的输入设备，其他程序也可以同时使用同一个麦克风。如果没有声音服务，就直接使用 ALSA 声卡。
+- macOS：通过 Core Audio 录音和播放。第一次录音时，macOS 会询问是否允许使用麦克风，允许之后才能录音。
+- Windows：通过 WASAPI 录音和播放。
+
+## 更换引擎
+
+如果想换一个语音识别或语音合成的引擎，不需要更换语音包。提供引擎的软件包（例如 DeepSeek 功能全家桶）安装之后，语音输入和朗读设置里的 `引擎` 下拉会多出一项，显示这个包的名字，和内置的引擎排在一起。选择这个引擎之后：
+
+- 语音输入不需要下载本机 163 MB 的识别模型；
+- 朗读会把较长的文字按句子切开，逐段交给这个引擎合成，再拼成一整段音频。
+
+> 开发者可以看核心仓库的 `docs/designs/20-语音.md`（语音的设计）和 `docs/designs/67-总线.md`（引擎怎么接入 `stt.engine`、`tts.engine`）。
+
+## 第三方组件
+
+| 组件 | 用途 | 许可证 |
 |---|---|---|
-| [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)（k2-fsa） | 静态链进 `miyu-voice-input`：本机识别 | Apache-2.0 |
-| [ONNX Runtime](https://github.com/microsoft/onnxruntime)（随 sherpa-onnx 的预编译库） | 静态链进 `miyu-voice-input` | MIT |
-| [rodio](https://github.com/RustAudio/rodio)、[cpal](https://github.com/RustAudio/cpal) | 编进程序：录音、放音 | MIT 或 Apache-2.0、Apache-2.0 |
-| [Symphonia](https://github.com/pdeljanov/Symphonia)（随 rodio） | 编进 `miyu-say`：解 mp3、wav | MPL-2.0 |
-| [SenseVoice-Small](https://github.com/FunAudioLLM/SenseVoice)（FunAudioLLM，sherpa-onnx 转的 int8 版） | 不随包发：`miyu-voice-input` 第一次启动时从 sherpa-onnx 的 Release 下载，对照钉死的 SHA-256 校验 | FunASR 模型许可（[MODEL_LICENSE](https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE)） |
+| [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)（k2-fsa） | 静态链接进 `miyu-voice-input`，用于本机语音识别 | Apache-2.0 |
+| [ONNX Runtime](https://github.com/microsoft/onnxruntime)（sherpa-onnx 附带的预编译库） | 静态链接进 `miyu-voice-input` | MIT |
+| [rodio](https://github.com/RustAudio/rodio)、[cpal](https://github.com/RustAudio/cpal) | 编译进程序，用于录音和播放 | MIT 或 Apache-2.0、Apache-2.0 |
+| [Symphonia](https://github.com/pdeljanov/Symphonia)（rodio 附带） | 编译进 `miyu-say`，用于解码 mp3 和 wav | MPL-2.0 |
+| [SenseVoice-Small](https://github.com/FunAudioLLM/SenseVoice)（FunAudioLLM，sherpa-onnx 转换的 int8 版本） | 不随包发布。`miyu-voice-input` 第一次启动时从 sherpa-onnx 的发行版页面下载，并用固定的 SHA-256 校验 | FunASR 模型许可（[MODEL_LICENSE](https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE)） |
 
-Apache-2.0、MIT、MPL-2.0 和本仓库的 AGPL-3.0 能放在一起发（MPL-2.0 照文件算，改了它的文件要照它公开）。每个包都带 `THIRD-PARTY-LICENSES.txt`：编进程序的每个第三方包、sherpa-onnx 静态链进来的 C++ 库（`licenses/native.txt`）的许可证原文；`cargo xtask notices` 重新生成，`cargo xtask licenses` 查（CI 跑）。
+Apache-2.0、MIT、MPL-2.0 都可以和本仓库的 AGPL-3.0 一起发布。MPL-2.0 按文件生效，如果修改了它的文件，就需要按 MPL-2.0 公开修改。
 
-还在施工，没发版。许可证 AGPL-3.0-or-later。
+每个包都附带 `THIRD-PARTY-LICENSES.txt`，里面是编译进程序的每个第三方库，以及 sherpa-onnx 静态链接进来的 C++ 库（`licenses/native.txt`）的许可证原文。运行 `cargo xtask notices` 可以重新生成这个文件，运行 `cargo xtask licenses` 可以检查它是否最新（CI 会运行这项检查）。
+
+## 许可证
+
+AGPL-3.0-or-later。这几个包目前还没有发布正式版本。

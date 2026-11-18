@@ -41,7 +41,7 @@ pub struct Settings {
     pub threshold: f32,
     /// 麦克风的设备名；空的用默认。
     pub microphone: String,
-    /// 说话时可以打断她（默认开）：她说话时也收麦（过回声消除），你一开口她就停。
+    /// 说话时可以打断 AI（默认开）：她说话时也收麦（过回声消除），你一开口她就停。
     pub full_duplex: bool,
 }
 

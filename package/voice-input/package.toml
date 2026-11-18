@@ -7,7 +7,7 @@ version = "0.1.0"
 targets = ["linux-x86_64", "macos-aarch64", "windows-x86_64"]
 protocol = [1, 1]
 name = { en = "Voice input", zh = "语音输入", ja = "音声入力" }
-summary = { en = "Turns speech into text on this computer: the microphone in the terminal and web, voice messages in chats", zh = "在这台电脑上把说的话转成字：终端、网页的麦克风，聊天里的语音消息", ja = "このコンピューターで話した言葉を文字にします：ターミナルとウェブのマイク、チャットの音声メッセージ" }
+summary = { en = "Turns speech into text on this computer: the microphone in the terminal and web, voice messages in chats", zh = "在这台电脑上把语音转成文字，用于终端和网页的麦克风输入，以及聊天里的语音消息", ja = "このコンピューターで話した言葉を文字にします：ターミナルとウェブのマイク、チャットの音声メッセージ" }
 upstream = "https://github.com/miyu-agent/miyu-voice"
 icon = "mic"
 # 配置键是 voice-input.*（同包编号，写明了不随编号变；程序照这个前缀读）。
@@ -17,7 +17,7 @@ prefix = "voice-input"
 [command]
 name = "voice-input"
 program = "miyu-voice-input"
-about = { en = "Voice input: model and microphone status", zh = "语音输入：模型、麦克风的情况", ja = "音声入力：モデルとマイクの状態" }
+about = { en = "Voice input: show the status of the speech model and the microphone", zh = "语音输入：查看识别模型和麦克风的状态", ja = "音声入力：モデルとマイクの状態" }
 
 [process]
 args = ["serve"]
@@ -40,7 +40,7 @@ default = "zh"
 layers = ["system"]
 applies = "now"
 name = { en = "Language", zh = "识别语言", ja = "認識する言語" }
-description = { en = "zh: Mandarin, yue: Cantonese. auto guesses, and sometimes takes Mandarin for Japanese.", zh = "zh 普通话，yue 粤语。auto 自己猜，会把普通话猜成日语。", ja = "zh は標準中国語、yue は広東語。auto は推測しますが、標準中国語を日本語と間違えることがあります。" }
+description = { en = "zh is Mandarin and yue is Cantonese. auto detects the language, but it sometimes mistakes Mandarin for Japanese.", zh = "zh 是普通话，yue 是粤语。auto 会自动判断语言，但是有时会把普通话误判成日语。", ja = "zh は標準中国語、yue は広東語。auto は推測しますが、標準中国語を日本語と間違えることがあります。" }
 
 [settings.microphone]
 type = "text"
@@ -50,7 +50,7 @@ choices_from = "microphones"
 layers = ["system"]
 applies = "now"
 name = { en = "Microphone", zh = "麦克风", ja = "マイク" }
-description = { en = "The device name. Empty: the system default.", zh = "设备名。不填用系统默认的。", ja = "デバイス名。空欄はシステムの既定。" }
+description = { en = "The device name. If you leave it empty, the system's default input is used.", zh = "麦克风的设备名。不填写时使用系统默认的输入设备。", ja = "デバイス名。空欄はシステムの既定。" }
 
 [settings.chime]
 type = "bool"
@@ -58,7 +58,7 @@ default = true
 layers = ["system"]
 applies = "now"
 name = { en = "Voice input sounds", zh = "语音输入提示音", ja = "音声入力の効果音" }
-description = { en = "A rising tone when it starts listening, a falling one when it stops.", zh = "开始听时响一声上扬的，停止听时响一声下沉的。", ja = "聞き始めに上がる音、止めるときに下がる音を鳴らします。" }
+description = { en = "Plays a rising tone when it starts listening and a falling tone when it stops.", zh = "开始听的时候播放一声上扬的提示音，停止听的时候播放一声下沉的提示音。", ja = "聞き始めに上がる音、止めるときに下がる音を鳴らします。" }
 
 [settings.engine]
 type = "text"
@@ -67,4 +67,4 @@ choices_from = "engines"
 layers = ["system"]
 applies = "now"
 name = { en = "Engine", zh = "引擎", ja = "エンジン" }
-description = { en = "SenseVoice on this computer (downloads a 163 MB model the first time), or an installed package that plugs into stt.engine, such as DeepSeek (no model download).", zh = "本机的 SenseVoice（第一次用要下 163 MB 的模型），或者装着的、接进 stt.engine 的包，例如 DeepSeek（不用下模型）。", ja = "このコンピューターの SenseVoice（初回に 163 MB のモデルをダウンロード）、または stt.engine に接続するインストール済みパッケージ（DeepSeek など、ダウンロード不要）。" }
+description = { en = "Use SenseVoice on this computer (it downloads a 163 MB model the first time), or an installed package that plugs into stt.engine, such as DeepSeek (no model download).", zh = "可以使用本机的 SenseVoice（第一次使用时需要下载 163 MB 的模型），也可以使用已安装、接入 stt.engine 的软件包，例如 DeepSeek（不需要下载模型）。", ja = "このコンピューターの SenseVoice（初回に 163 MB のモデルをダウンロード）、または stt.engine に接続するインストール済みパッケージ（DeepSeek など、ダウンロード不要）。" }
