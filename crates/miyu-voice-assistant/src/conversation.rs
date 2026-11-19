@@ -1,5 +1,5 @@
 //! 和她说话（设计 20 第九节「一个本机场所」「规程」第 3～5 步）：助手是 `voice` 平台的桥（清单 `[connection] platform`），
-//! 场所 `voice:local` 里只有主人一个人（核心 VA-1：`voice` 平台的 `owner` 天然算主人，core1 11-10 定 A）。会话一直续下去，
+//! 场所 `voice:local` 里只有主人一个人（核心 VA-1：`voice` 平台的 `owner` 天然算主人，2026-11-10 定）。会话一直续下去，
 //! 终端、网页里看得到；`images=false`（说话看不到图）。
 //!
 //! 听到的一句照主人说话交过去（`session.send` 带 `as`）；她的回答照会话推来的增量一句句念（[`crate::reply`]）：一句句交
@@ -25,7 +25,7 @@ use crate::reply::Reply;
 
 /// 场所编号。
 pub const VENUE: &str = "voice:local";
-/// 主人在这个平台上的身份：带平台前缀（core1 11-10，VA-1：核心只认 `voice:` 场所里的 `voice:owner` 是主人）。
+/// 主人在这个平台上的身份：带平台前缀（2026-11-10，VA-1：核心只认 `voice:` 场所里的 `voice:owner` 是主人）。
 pub const OWNER: &str = "voice:owner";
 /// 念完以后追问窗口开多久（第 5 步）。
 pub const FOLLOW_UP: Duration = Duration::from_secs(30);

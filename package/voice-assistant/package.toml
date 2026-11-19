@@ -28,7 +28,7 @@ start = "always"
 # 打断这一轮（session.interrupt）。
 capabilities = ["audio.record", "audio.play", "packages.call", "act_for_external", "events.read", "sessions.drive"]
 
-# 场所会话的平台：voice:local 一个场所，只有主人（设计 20 第九节，core1 11-10 定 A）。
+# 场所会话的平台：voice:local 一个场所，只有主人（设计 20 第九节，2026-11-10 定）。
 [connection]
 platform = "voice"
 

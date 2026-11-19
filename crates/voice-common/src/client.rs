@@ -1,6 +1,6 @@
 //! 人敲的命令（`miyu say`、`miyu listen`）连核心（核心 `docs/reference/connection.md`「本机的头」）：数据根的 `run/socket`
 //! 里是套接字的路径（Windows 是命名管道的名字），`run/token` 里是本机令牌；握手以后经总线、`package.call` 找到在跑的那个
-//! 进程去办，命令自己不读配置、不碰声卡（设计 20 第六、九节）。只读的会话里数据根藏着，连不上，照实说（core1 11-10）。
+//! 进程去办，命令自己不读配置、不碰声卡（设计 20 第六、九节）。只读的会话里数据根藏着，连不上，照实说（2026-11-10 定）。
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;

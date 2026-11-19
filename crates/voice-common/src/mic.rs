@@ -36,7 +36,7 @@ struct Found {
 }
 
 fn found(host: &cpal::Host) -> (Listing, Vec<Found>) {
-    // 照枚举比，不照名字的字符串（core1 审 VO-22）：cpal 多了一种的话这里编不过，不会悄悄当成别的系统。
+    // 照枚举比，不照名字的字符串（审 VO-22 时提的）：cpal 多了一种的话这里编不过，不会悄悄当成别的系统。
     #[cfg(target_os = "linux")]
     let listing = match host.id() {
         cpal::HostId::PulseAudio => Listing::Server,
