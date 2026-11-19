@@ -105,13 +105,13 @@ default = "mainland"
 layers = ["system"]
 applies = "now"
 name = { en = "MiniMax region", zh = "MiniMax 地区", ja = "MiniMax の地域" }
-description = { en = "mainland: api.minimaxi.com. international: api.minimax.io. Keys don't work across regions.", zh = "mainland 是国内版（api.minimaxi.com），international 是国际版（api.minimax.io）。两个地区的 key 不能通用。", ja = "mainland は中国本土（api.minimaxi.com）、international は国際版（api.minimax.io）。キーは共通ではありません。" }
+description = { en = "mainland: api.minimaxi.com. international: api.minimax.io. Keys don't work across regions.", zh = "mainland 是国内版（api.minimaxi.com），international 是国际版（api.minimax.io）。两个地区的密钥不能通用。", ja = "mainland は中国本土（api.minimaxi.com）、international は国際版（api.minimax.io）。キーは共通ではありません。" }
 
 [settings.minimax.key]
 type = "secret"
 layers = ["system"]
 applies = "now"
-name = { en = "MiniMax API key", zh = "MiniMax 的 API key", ja = "MiniMax の API キー" }
+name = { en = "MiniMax API key", zh = "MiniMax 的 API 密钥", ja = "MiniMax の API キー" }
 
 [settings.minimax.model]
 type = "text"
@@ -130,7 +130,7 @@ shown_when = { engine = "mimo" }
 type = "secret"
 layers = ["system"]
 applies = "now"
-name = { en = "MiMo API key", zh = "MiMo 的 API key", ja = "MiMo の API キー" }
+name = { en = "MiMo API key", zh = "MiMo 的 API 密钥", ja = "MiMo の API キー" }
 
 [settings.mimo.model]
 type = "text"
@@ -156,8 +156,8 @@ description = { en = "Write the address up to /v1. For a local server, for examp
 type = "secret"
 layers = ["system"]
 applies = "now"
-name = { en = "API key", zh = "API key", ja = "API キー" }
-description = { en = "Leave it empty if your local server does not need a key.", zh = "如果本机服务不需要 key，这里留空即可。", ja = "キー不要のローカルサーバーなら空欄。" }
+name = { en = "API key", zh = "API 密钥", ja = "API キー" }
+description = { en = "Leave it empty if your local server does not need a key.", zh = "如果本机服务不需要密钥，这里留空即可。", ja = "キー不要のローカルサーバーなら空欄。" }
 
 [settings.openai.model]
 type = "text"
