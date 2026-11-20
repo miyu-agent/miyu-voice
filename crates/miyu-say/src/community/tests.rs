@@ -136,3 +136,19 @@ fn mp3_pieces_lose_their_tags_and_header_frames_before_joining() {
     assert!(joined.bytes == expected, "only the audio frames are left");
     assert_eq!(joined.duration_ms, Some(1_000));
 }
+
+/// 引擎回了错（DeepSeek 余额不足）：她看到的报错带上引擎自己说的原因，不只是核心那句「方法执行失败。」（主人 11-20 验收第 6 条）。
+#[test]
+fn an_engine_failure_keeps_the_engine_s_reason() {
+    let error = miyu_ext::CoreError {
+        code: Some(-32000),
+        reason: Some("method_failed".to_string()),
+        message: "方法执行失败。".to_string(),
+        data: json!({"reason": "method_failed", "code": "engine_failed",
+                     "message": "DeepSeek text to speech failed (402: the DeepSeek balance is too low): Insufficient Balance"}),
+    };
+    assert_eq!(
+        super::failed("deepseek-tools", &error).message(),
+        "deepseek-tools: DeepSeek text to speech failed (402: the DeepSeek balance is too low): Insufficient Balance"
+    );
+}

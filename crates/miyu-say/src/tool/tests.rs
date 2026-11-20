@@ -1,4 +1,6 @@
-use super::{extension, seconds, short_hash, store, too_long};
+use serde_json::json;
+
+use super::{ends, extension, seconds, short_hash, store, too_long};
 
 #[test]
 fn audio_is_stored_under_its_hash_and_no_temp_is_left() {
@@ -68,4 +70,31 @@ fn a_temp_file_already_there_is_left_alone() {
     assert!(stored.is_ok(), "{stored:?}");
     assert!(theirs.exists(), "the other writer's temp file stays");
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// 说出来的默认结束这一轮（主人 11-20 验收第 5 条，照表情包）；写了 `end: false` 的接着干活；`file_only` 要拿路径接着用，没写的
+/// 不结束，写了 `end: true` 的照写的。
+#[test]
+fn speaking_ends_the_turn_unless_end_is_false_or_it_only_saves_a_file() {
+    assert!(ends(&json!({"text": "好的"})));
+    assert!(!ends(&json!({"text": "好的", "end": false})));
+    assert!(!ends(&json!({"text": "好的", "file_only": true})));
+    assert!(ends(
+        &json!({"text": "好的", "file_only": true, "end": true})
+    ));
+}
+
+/// 工具说明三句以内，写着默认结束、`end` 的默认值（提示词登记簿记着这一份的 token）。
+#[test]
+fn the_tool_says_it_ends_the_turn() {
+    let description = super::DESCRIPTION;
+    assert!(description.contains("ends your turn unless end is false"));
+    assert!(
+        description.matches(". ").count() <= 2,
+        "at most three sentences"
+    );
+    assert_eq!(
+        super::schema()["properties"]["end"]["description"],
+        "Default true, false with file_only."
+    );
 }

@@ -418,7 +418,7 @@ fn understand(core: &Core, audio: &[f32]) -> Result<Option<String>, String> {
                 "bus.call",
                 json!({"name": "stt", "method": "transcribe", "params": {"audio": blob}}),
             )
-            .map_err(|error| error.to_string())
+            .map_err(|error| voice_common::refusal::why(&error))
         });
     heard.map(|answer| {
         (answer["clear"] == true)

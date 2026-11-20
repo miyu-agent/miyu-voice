@@ -247,7 +247,7 @@ impl Service {
                 json!({"name": "stt.engine", "package": engine, "method": "transcribe",
                        "params": {"audio": blob, "language": language}}),
             )
-            .map_err(|error| MethodError::new("engine_failed", format!("{engine}: {error}")))?;
+            .map_err(|error| engine_failed(&engine, &error))?;
         let text = filter::kept(answer["text"].as_str().unwrap_or_default());
         Ok(Heard {
             clear: text.is_some(),
@@ -305,6 +305,15 @@ fn nothing_heard(
         answer["ended"] = ended.into();
     }
     answer
+}
+
+/// 社区引擎认不了：写明是哪个包，原因照它自己说的（[`voice_common::refusal::why`]；原来只剩核心那句「方法执行失败。」，
+/// 项目主人 2026-11-20 验收第 6 条，施工 VO-45）。
+fn engine_failed(engine: &str, error: &miyu_ext::CoreError) -> MethodError {
+    MethodError::new(
+        "engine_failed",
+        format!("{engine}: {}", voice_common::refusal::why(error)),
+    )
 }
 
 /// 交社区引擎的 wav 解成样本（审计 #122）：先照头算时长，超了 [`LONGEST_MS`] 的回 `too_long`，不在常驻的主进程里整段解码。

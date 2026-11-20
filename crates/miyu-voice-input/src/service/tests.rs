@@ -73,3 +73,21 @@ fn the_community_engine_path_refuses_audio_over_ten_minutes() {
     assert_eq!(error.code.as_deref(), Some("too_long"));
     assert!(super::within_limit(LONGEST_MS).is_ok());
 }
+
+/// 社区引擎回了错（DeepSeek 余额不足）：报错带上引擎自己说的原因，不只是核心那句「方法执行失败。」（主人 11-20 验收第 6 条）。
+#[test]
+fn an_engine_failure_keeps_the_engine_s_reason() {
+    let error = miyu_ext::CoreError {
+        code: Some(-32000),
+        reason: Some("method_failed".to_string()),
+        message: "方法执行失败。".to_string(),
+        data: json!({"reason": "method_failed", "code": "engine_failed",
+                     "message": "DeepSeek speech to text failed (402: the DeepSeek balance is too low): Insufficient Balance"}),
+    };
+    let failed = super::engine_failed("deepseek-tools", &error);
+    assert_eq!(failed.code.as_deref(), Some("engine_failed"));
+    assert_eq!(
+        failed.message,
+        "deepseek-tools: DeepSeek speech to text failed (402: the DeepSeek balance is too low): Insufficient Balance"
+    );
+}

@@ -3,6 +3,10 @@
 //! 这台电脑的音箱放、网页在浏览器里放、im 在场所里发成语音消息（核心 SD-1）。`file_only` 照以前只存进这一轮工作区的
 //! `audio/`、交回路径，不交给人。场所的平台给了语音上限（`voice_max_ms`）的，长过它的不交、回报错让她重说（主人定：不退回
 //! 发文件、不切）。给模型看的字写英文短句，记在 `docs/prompt-ledger.md`。
+//!
+//! 念完就结束这一轮（施工 VO-45，项目主人 2026-11-20 验收第 5 条，照表情包 `meme_send`）：`end` 不写当 `true`，结果带
+//! `end_turn`（核心不再请求模型，这一轮到此为止），像最后一句话是语音；写 `end: false` 的接着干活。`file_only` 不写 `end` 的不
+//! 结束：要的是文件路径，拿到了还要接着用（发出去、展示）。出错的不结束，让她改了再说。
 //! 存文件先写临时文件再改名（预先放好的链接只会被换掉，不会被顺着写进去），同 miyu-render 的存图。
 
 use std::fs;
@@ -23,17 +27,23 @@ pub const NAME: &str = "say";
 /// 存在工作区的哪个文件夹。
 pub const FOLDER: &str = "audio";
 
+/// 工具说明：三句，记在 `docs/prompt-ledger.md`。
+pub const DESCRIPTION: &str = "Speak text aloud in your voice: the person hears it where they talk with you, as a voice message in chats, and it ends your turn unless end is false. With nobody in the conversation (a schedule or a loop), decide whether it should be heard. Set file_only to just save an audio file and get its path.";
+
+/// 参数。
+#[must_use]
+pub fn schema() -> Value {
+    json!({"type": "object", "properties": {"text": {"type": "string"}, "file_only": {"type": "boolean"}, "end": {"type": "boolean", "description": "Default true, false with file_only."}}, "required": ["text"]})
+}
+
 /// 工具的规格。
 #[must_use]
 pub fn spec() -> Tool {
-    Tool::new(
-        NAME,
-        "Speak text aloud in your voice: the person hears it where they talk with you, as a voice message in chats. With nobody in the conversation (a schedule or a loop), decide whether it should be heard. Set file_only to just save an audio file and get its path.",
-    )
-    .schema(json!({"type": "object", "properties": {"text": {"type": "string"}, "file_only": {"type": "boolean"}}, "required": ["text"]}))
-    .access("write")
-    .venues(&["local", "private", "group"])
-    .display_name(json!({"zh": "说话", "en": "Say", "ja": "話す"}))
+    Tool::new(NAME, DESCRIPTION)
+        .schema(schema())
+        .access("write")
+        .venues(&["local", "private", "group"])
+        .display_name(json!({"zh": "说话", "en": "Say", "ja": "話す"}))
 }
 
 /// 办一次：合成，交给人或者存好。
@@ -44,7 +54,18 @@ pub fn call(service: &Arc<Service>, args: &Value, call: &Call) -> Reply {
     }
 }
 
+/// 这一次合成好了以后结束不结束这一轮：写了 `end` 的照它；没写的说出来的结束，`file_only` 的不结束。
+fn ends(args: &Value) -> bool {
+    let file_only = args["file_only"].as_bool().unwrap_or(false);
+    args["end"].as_bool().unwrap_or(!file_only)
+}
+
 fn run(service: &Arc<Service>, args: &Value, call: &Call) -> Result<Reply, String> {
+    let reply = done(service, args, call)?;
+    Ok(if ends(args) { reply.end_turn() } else { reply })
+}
+
+fn done(service: &Arc<Service>, args: &Value, call: &Call) -> Result<Reply, String> {
     let text = args["text"].as_str().ok_or("Give text.")?;
     let file_only = args["file_only"].as_bool().unwrap_or(false);
     if file_only && call.cwd().is_empty() {

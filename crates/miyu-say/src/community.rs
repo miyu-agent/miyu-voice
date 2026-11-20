@@ -1,9 +1,9 @@
 //! 社区的合成引擎（核心 `docs/reference/bus.md` 的 `tts.engine`，施工 VO-29）：配置里「引擎」选「社区引擎」、再挑一个接进
 //! `tts.engine` 的包，照总线调它。它一次只收一句、最多 500 字，长的这边按句切开挨个调，拼回一段。
 
-use miyu_ext::Core;
+use miyu_ext::{Core, CoreError};
 use serde_json::{Value, json};
-use voice_common::{audio, blobs, speakable};
+use voice_common::{audio, blobs, refusal, speakable};
 
 use crate::engine::{Audio, Engine, EngineError, Request, Voice};
 use crate::mp3;
@@ -59,7 +59,7 @@ impl Community {
                 "bus.call",
                 json!({"name": "tts.engine", "package": self.package, "method": method, "params": params}),
             )
-            .map_err(|error| EngineError::Failed(format!("{}: {error}", self.package)))
+            .map_err(|error| failed(&self.package, &error))
     }
 
     /// 合成一句，读回音频的字节。
@@ -79,6 +79,12 @@ impl Community {
             duration_ms: answer["duration_ms"].as_u64(),
         })
     }
+}
+
+/// 调不成：写明是哪个包，原因照它自己说的（[`refusal::why`]；原来只剩核心那句「方法执行失败。」，施工 VO-45）。
+#[must_use]
+pub fn failed(package: &str, error: &CoreError) -> EngineError {
+    EngineError::Failed(format!("{package}: {}", refusal::why(error)))
 }
 
 /// `tts.engine.voices` 的回应读成音色。

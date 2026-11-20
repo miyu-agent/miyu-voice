@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 
 use miyu_ext::Core;
 use serde_json::{Value, json};
-use voice_common::blobs;
 use voice_common::speaker::{PlayError, Speaker};
+use voice_common::{blobs, refusal};
 
 use crate::capture::Switches;
 use crate::choice::Choice;
@@ -396,7 +396,7 @@ fn synthesize_ahead(
                     }
                     other => {
                         let why = other
-                            .map_or_else(|error| error.to_string(), |answer| answer.to_string());
+                            .map_or_else(|error| refusal::why(&error), |answer| answer.to_string());
                         speaking.fail(why);
                         speaking.end();
                     }
