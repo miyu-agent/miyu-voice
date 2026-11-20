@@ -35,14 +35,16 @@ platform = "voice"
 [depends]
 packages = ["voice-input", "say"]
 
-# 配置页（设计 20 第九节「配置页」）：唤醒词、灵敏度、麦克风。键是 voice-assistant.*。
+# 配置页（设计 20 第九节「配置页」）：唤醒词、灵敏度、麦克风、人格、预设。键是 voice-assistant.*。
+# 唤醒词、门槛、麦克风改了当场生效（施工 VO-44：程序收到配置推送就照新的重建、重开，不用等它重开）。
 
 [settings.wake_words]
 type = "list"
 element = "text"
 layers = ["system"]
-applies = "program_start"
+applies = "now"
 name = { en = "Wake words", zh = "唤醒词", ja = "ウェイクワード" }
+description = { en = "If you leave it empty, the wake word is 你好你好 (ni hao ni hao).", zh = "不填写时，唤醒词是「你好你好」。", ja = "空欄のときは「你好你好」（ニーハオニーハオ）。" }
 
 [settings.sensitivity]
 type = "number"
@@ -52,7 +54,7 @@ step = 0.05
 slider = true
 default = 0.25
 layers = ["system"]
-applies = "program_start"
+applies = "now"
 name = { en = "Wake threshold", zh = "唤醒门槛", ja = "ウェイクのしきい値" }
 description = { en = "A lower value wakes more easily, and also wakes by mistake more often.", zh = "数值越低越容易唤醒，误唤醒也会越多。", ja = "低いほど反応しやすく、誤反応も増えます。" }
 
@@ -62,7 +64,7 @@ max = 200
 # 配置页画成下拉：选项问这个包的 microphones 方法（核心 SG-2；调不到的头退回文字框）。
 choices_from = "microphones"
 layers = ["system"]
-applies = "program_start"
+applies = "now"
 name = { en = "Microphone", zh = "麦克风", ja = "マイク" }
 description = { en = "The device name. If you leave it empty, the system's default input is used.", zh = "麦克风的设备名。不填写时使用系统默认的输入设备。", ja = "デバイス名。空欄はシステムの既定。" }
 
@@ -73,3 +75,20 @@ layers = ["system"]
 applies = "now"
 name = { en = "Interrupt the AI by speaking", zh = "说话时可以打断 AI", ja = "話しかけて止める" }
 description = { en = "If you start talking while the AI is speaking, it stops. When this is off, the AI listens only after it has finished speaking.", zh = "AI 正在说话时，只要你开口，AI 就会停下。关闭之后，AI 说完才会开始听你说话。", ja = "話している途中で話しかけると止まります。オフ：話し終わってから聞きます。" }
+
+# 语音会话用的人格、预设（施工 VO-44）：不选的照核心的默认。核心找回已有的会话时不看这两项，所以改了以后，程序在这一场对话
+# 结束以后另开一个语音会话（venue.session 的 fresh），不打断正在进行的对话。
+
+[settings.persona]
+type = "persona"
+layers = ["system"]
+applies = "new_session"
+name = { en = "Persona", zh = "人格", ja = "ペルソナ" }
+description = { en = "The persona you talk to by voice. If you don't choose one, the default persona is used. After a change, the next voice conversation starts a new session.", zh = "语音对话使用的人格。不选择时使用默认的人格。修改之后，下一次语音对话会开始一个新的会话。", ja = "音声で話すペルソナ。未選択なら既定のペルソナ。変更すると、次の音声会話から新しいセッションになります。" }
+
+[settings.preset]
+type = "preset"
+layers = ["system"]
+applies = "new_session"
+name = { en = "Preset", zh = "预设", ja = "プリセット" }
+description = { en = "The preset of the voice conversation, which decides what the AI can use. If you don't choose one, the default preset is used. After a change, the next voice conversation starts a new session.", zh = "语音对话使用的预设，它决定 AI 能使用哪些功能。不选择时使用默认的预设。修改之后，下一次语音对话会开始一个新的会话。", ja = "音声会話のプリセット（AI が使える機能）。未選択なら既定のプリセット。変更すると、次の音声会話から新しいセッションになります。" }

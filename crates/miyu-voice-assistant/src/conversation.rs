@@ -20,6 +20,7 @@ use voice_common::blobs;
 use voice_common::speaker::{PlayError, Speaker};
 
 use crate::capture::Switches;
+use crate::choice::Choice;
 use crate::notify::{Identity, Notice, Notifier, Step};
 use crate::reply::Reply;
 
@@ -81,22 +82,22 @@ enum Spoken {
 }
 
 impl Conversation {
-    /// 找回或者造这个场所的会话，订阅它的事件；第一次造的记一条「这一场是念出来的」。
+    /// 找回或者造这个场所的会话（`choice` 是造的时候用的人格、预设，`fresh` 是不找回、另开一个），订阅它的事件；新造的记一条
+    /// 「这一场是念出来的」。
     ///
     /// # Errors
     ///
-    /// 核心拒了（没批 `act_for_external`、`events.read`）。
+    /// 核心拒了（没批 `act_for_external`、`events.read`，人格、预设不在了）。
     pub fn open(
         core: &Core,
+        choice: &Choice,
+        fresh: bool,
         switches: &Switches,
         notifier: &Arc<Notifier>,
         speaker: &Speaker,
     ) -> Result<Arc<Conversation>, String> {
         let opened = core
-            .call(
-                "venue.session",
-                json!({"venue": VENUE, "kind": "private", "peer": OWNER, "images": false}),
-            )
+            .call("venue.session", choice.session_params(VENUE, OWNER, fresh))
             .map_err(|error| format!("venue.session: {error}"))?;
         let session = opened["session"].as_str().unwrap_or_default().to_string();
         if opened["created"] == true {
@@ -111,10 +112,12 @@ impl Conversation {
             .map_err(|error| format!("subscribe: {error}"))?;
         // 照会话的人格念（朗读的配置里每个人格一种音色，设计 20 第六节）；没有人格的用默认音色。
         let persona = subscribed["persona"].as_str().map(str::to_string);
-        // 通知署这个人格的名字、带它的头像（施工 VO-16）。
-        if let Some(persona) = &persona {
-            notifier.set_identity(Identity::of(core, persona));
-        }
+        // 通知署这个人格的名字、带它的头像（施工 VO-16）；换成没有人格的会话（VO-44）署回 Miyu。
+        notifier.set_identity(
+            persona
+                .as_deref()
+                .map_or_else(Identity::default, |persona| Identity::of(core, persona)),
+        );
         let window = Arc::new(Mutex::new(Window::default()));
         let (sentences, queue) = mpsc::channel();
         let generation = Arc::new(AtomicU64::new(0));
@@ -143,6 +146,16 @@ impl Conversation {
             notifier: Arc::clone(notifier),
             speaker: speaker.clone(),
         }))
+    }
+
+    /// 换了会话（人格、预设改了另开的）：不再收这一个的事件。
+    pub fn unsubscribe(&self, core: &Core) {
+        if let Err(error) = core.call(
+            "unsubscribe",
+            json!({"stream": "events", "session": self.session}),
+        ) {
+            eprintln!("miyu-voice-assistant: unsubscribe: {error}");
+        }
     }
 
     /// 关了对话（`miyu listen off`）：追问窗口收掉；她还在想、在说的，打断这一轮（同开口就打断），完了也不再开窗口。

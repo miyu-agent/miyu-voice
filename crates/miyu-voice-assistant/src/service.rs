@@ -5,9 +5,12 @@
 //! 包装着、没停用就一直听唤醒词（项目主人 2026-11-10 定）：不想让它听的，在软件包里把它停用。`miyu listen` 开关的是对话：
 //! 开了同喊了唤醒词，响一声、等 30 秒你开口；关了响另一声，她还在想、在说的打断，回到只等唤醒词。对话自己也会结束：
 //! 叫醒了一直没开口、她答完 30 秒没再说，响结束那一声、弹一条「对话结束」（施工 VO-18，主人：「什么时候off啊？」）。
+//!
+//! 配置改了当场生效（施工 VO-44，项目主人 2026-11-20 验收第 1、3 条）：唤醒词、门槛下一帧照新的重建听的那一套
+//! （[`crate::ears`]），换了麦克风关了重开；换了人格、预设的，这一场对话完了另开一个语音会话（[`crate::choice`]），不打断正在说的。
 
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -17,9 +20,10 @@ use serde_json::{Map, Value, json};
 use voice_common::{audio, blobs, speaker::Speaker};
 
 use crate::capture::{self, Switches};
+use crate::choice::Choice;
 use crate::conversation::Conversation;
-use crate::keywords;
-use crate::listen::{Event, Listener, RATE, Sensitivity};
+use crate::ears::{self, Ears, Tuning};
+use crate::listen::{Event, Listener, RATE};
 use crate::models::Models;
 use crate::notify::{Notice, Notifier, Step};
 use crate::reply::Reply;
@@ -29,8 +33,8 @@ use voice_common::chime::{self, Chime};
 const AWAIT: Duration = Duration::from_secs(8);
 /// `miyu listen` 开了对话以后等多久：同她答完以后的追问窗口（敲完命令、按完热键要一会儿才开口）。
 const AWAIT_COMMAND: Duration = crate::conversation::FOLLOW_UP;
-/// 默认的唤醒词（设计 20 第九节：Miyu 的名字的几种念法）。
-pub const DEFAULT_WAKE_WORDS: [&str; 4] = ["未有未有", "密友密友", "miyumiyu", "みゆみゆ"];
+/// 默认的唤醒词（项目主人 2026-11-20 验收第 2 条：只留「你好你好」；原来是 Miyu 的名字的几种念法）。
+pub const DEFAULT_WAKE_WORDS: [&str; 1] = ["你好你好"];
 
 /// 包的配置（清单里的 `voice-assistant.*`）。
 #[derive(Debug, Clone, PartialEq)]
@@ -43,6 +47,8 @@ pub struct Settings {
     pub microphone: String,
     /// 说话时可以打断 AI（默认开）：她说话时也收麦（过回声消除），你一开口她就停。
     pub full_duplex: bool,
+    /// 语音会话用的人格、预设（施工 VO-44）。
+    pub choice: Choice,
 }
 
 impl Settings {
@@ -81,6 +87,7 @@ impl Settings {
                 .unwrap_or_default()
                 .trim()
                 .to_string(),
+            choice: Choice::from_config(config),
         }
     }
 }
@@ -88,28 +95,40 @@ impl Settings {
 /// 跑着的助手。
 pub struct Service {
     cache: PathBuf,
+    /// 包的状态目录（`MIYU_STATE_DIR`）：记语音会话上一次照哪个人格、预设开的。
+    state: Option<PathBuf>,
     switches: Switches,
     speaker: Speaker,
     notifier: Arc<Notifier>,
     settings: Mutex<Settings>,
     conversation: Mutex<Option<Arc<Conversation>>>,
+    /// 现在的语音会话照哪一份人格、预设开的（还没开的是空的）。
+    applied: Mutex<Option<Choice>>,
+    /// 人格、预设改了，还没另开会话（等这一场对话完了）。
+    reopen_session: AtomicBool,
+    /// 一次只开一个会话。
+    opening: Mutex<()>,
     reply: Mutex<Reply>,
 }
 
 impl Service {
-    /// `cache` 是这个包的缓存目录。
+    /// `cache` 是这个包的缓存目录，`state` 是状态目录。
     #[must_use]
-    pub fn new(cache: PathBuf) -> Arc<Service> {
+    pub fn new(cache: PathBuf, state: Option<PathBuf>) -> Arc<Service> {
         let switches = Switches::default();
         switches.full_duplex.store(true, Ordering::SeqCst);
         Arc::new(Service {
             cache,
+            state,
             // 助手放的声音（提示音、她念的话）都让回声消除旁听（施工 VO-20）。
             speaker: Speaker::tapped(switches.played.tap()),
             switches,
             notifier: Arc::new(Notifier::start()),
             settings: Mutex::new(Settings::from_config(&Map::new())),
             conversation: Mutex::new(None),
+            applied: Mutex::new(None),
+            reopen_session: AtomicBool::new(false),
+            opening: Mutex::new(()),
             reply: Mutex::new(Reply::default()),
         })
     }
@@ -143,14 +162,96 @@ impl Service {
             .clone()
     }
 
-    /// 配置变了：重读（唤醒词变了的，下一次开麦时照新的建）。
-    pub fn reload(&self, core: &Core) {
+    fn settings(&self) -> Settings {
+        self.settings
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// 配置变了：重读。唤醒词、门槛收麦的线程下一帧就照新的（[`Ears`]）；换了麦克风的关了重开；换了人格、预设的另开会话，
+    /// 正在对话的等这一场完了。
+    pub fn reload(self: &Arc<Service>, core: &Core) {
         self.notifier.set_language(&core.language());
         let settings = Settings::from_config(&core.config());
         self.switches
             .full_duplex
             .store(settings.full_duplex, Ordering::SeqCst);
-        *self.settings.lock().unwrap_or_else(PoisonError::into_inner) = settings;
+        let before = std::mem::replace(
+            &mut *self.settings.lock().unwrap_or_else(PoisonError::into_inner),
+            settings.clone(),
+        );
+        if before.microphone != settings.microphone {
+            self.switches.reopen.store(true, Ordering::SeqCst);
+        }
+        let applied = self
+            .applied
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if applied.is_some_and(|applied| applied != settings.choice) {
+            self.reopen_session.store(true, Ordering::SeqCst);
+            self.session_between_conversations(core);
+        }
+    }
+
+    /// 人格、预设改过、现在没在对话：另开会话（另开线程，不耽误收麦、配置推送）。
+    fn session_between_conversations(self: &Arc<Service>, core: &Core) {
+        let talking = self.switches.open.load(Ordering::SeqCst)
+            || self
+                .conversation()
+                .is_some_and(|conversation| conversation.window_open());
+        if !talking && self.reopen_session.swap(false, Ordering::SeqCst) {
+            let service = Arc::clone(self);
+            let core = core.clone();
+            std::thread::spawn(move || service.open_session(&core));
+        }
+    }
+
+    /// 照现在的人格、预设找回或者另开语音会话：和上一次照着开的（[`Choice::load`]）不一样的另开一个（`fresh`）。开好的换上、
+    /// 记下，原来的退订；开不了的说一声，原来的接着用。
+    fn open_session(&self, core: &Core) {
+        let _one = self.opening.lock().unwrap_or_else(PoisonError::into_inner);
+        let choice = self.settings().choice;
+        let last = self
+            .applied
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .or_else(|| self.state.as_deref().map(Choice::load))
+            .unwrap_or_default();
+        let fresh = choice != last;
+        if !fresh && self.conversation().is_some() {
+            return;
+        }
+        let opened = Conversation::open(
+            core,
+            &choice,
+            fresh,
+            &self.switches,
+            &self.notifier,
+            &self.speaker,
+        );
+        match opened {
+            Ok(conversation) => {
+                if let Some(Err(why)) = self.state.as_deref().map(|dir| choice.save(dir)) {
+                    eprintln!("miyu-voice-assistant: {why}");
+                }
+                *self.applied.lock().unwrap_or_else(PoisonError::into_inner) = Some(choice);
+                let old = self
+                    .conversation
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .replace(conversation);
+                if let Some(old) = old {
+                    old.unsubscribe(core);
+                }
+            }
+            Err(why) => {
+                eprintln!("miyu-voice-assistant: {why}");
+                self.notifier.show(Notice::Trouble(Step::Sending, why));
+            }
+        }
     }
 
     /// 起来以后：下模型，建听的那一套，一直收着麦（另开线程）；认字也另开线程，免得认的时候漏了麦克风的声音。
@@ -160,103 +261,83 @@ impl Service {
             eprintln!("miyu-voice-assistant: {why}");
             return;
         }
-        let settings = self
-            .settings
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
         // 听的那一套（两个模型，约 40 MB）第一次真的开麦收到声音时才建：装上没开的助手只占几 MB。
-        let mut listener: Option<Listener> = None;
-        let mut unbuildable = false;
-        match Conversation::open(core, &self.switches, &self.notifier, &self.speaker) {
-            Ok(conversation) => {
-                *self
-                    .conversation
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner) = Some(conversation);
-            }
-            Err(why) => eprintln!("miyu-voice-assistant: {why}"),
-        }
+        let mut ears = Ears::<Listener>::default();
+        self.open_session(core);
         let (utterances, heard) = mpsc::channel::<Vec<f32>>();
         self.understand_in_turn(core, heard);
         let service = Arc::clone(self);
         let barge_core = core.clone();
-        let microphone = Some(settings.microphone.clone()).filter(|name| !name.is_empty());
         std::thread::spawn(move || {
             // 等下一句：从什么时候起、等多久。
             let mut awaiting = None::<(Instant, Duration)>;
             let mut was_open = false;
-            capture::run(
-                microphone.as_deref(),
-                &service.switches,
-                &service.notifier,
-                |frame| {
-                    if listener.is_none() && !unbuildable {
-                        match build_listener(&models, &settings) {
-                            Ok(built) => listener = Some(built),
-                            Err(why) => {
-                                eprintln!("miyu-voice-assistant: {why}");
-                                unbuildable = true;
-                            }
-                        }
-                    }
-                    let Some(listener) = listener.as_mut() else {
-                        return;
-                    };
-                    let switches = &service.switches;
-                    if switches.wake.swap(false, Ordering::SeqCst) {
-                        awaiting = Some((Instant::now(), AWAIT_COMMAND));
-                    }
-                    if switches.ended.swap(false, Ordering::SeqCst)
-                        || awaiting.is_some_and(|(since, wait)| since.elapsed() > wait)
-                            && !listener.hearing()
-                    {
-                        awaiting = None;
-                    }
-                    // 窗口：叫醒以后等下一句，她在想、在说，念完以后的追问窗口。
-                    let follow_up = service
-                        .conversation()
-                        .is_some_and(|conversation| conversation.window_open());
-                    let open = awaiting.is_some() || follow_up;
-                    switches.open.store(open, Ordering::SeqCst);
-                    listener.set_window(open);
-                    // 对话自己结束了（`miyu listen off` 关的那边已经响过、说过）。
-                    if was_open && !open && !switches.silenced.swap(false, Ordering::SeqCst) {
+            // 每次开麦时问现在配置的是哪个麦克风。
+            let device = || Some(service.settings().microphone).filter(|name| !name.is_empty());
+            let say = |notice| service.notifier.show(notice);
+            capture::run(&device, &service.switches, &say, |frame| {
+                let tuning = Tuning::of(&service.settings());
+                let Some(listener) = ears.tuned(&tuning, |tuning| ears::build(&models, tuning))
+                else {
+                    return;
+                };
+                let switches = &service.switches;
+                if switches.wake.swap(false, Ordering::SeqCst) {
+                    awaiting = Some((Instant::now(), AWAIT_COMMAND));
+                }
+                if switches.ended.swap(false, Ordering::SeqCst)
+                    || awaiting.is_some_and(|(since, wait)| since.elapsed() > wait)
+                        && !listener.hearing()
+                {
+                    awaiting = None;
+                }
+                // 窗口：叫醒以后等下一句，她在想、在说，念完以后的追问窗口。
+                let follow_up = service
+                    .conversation()
+                    .is_some_and(|conversation| conversation.window_open());
+                let open = awaiting.is_some() || follow_up;
+                switches.open.store(open, Ordering::SeqCst);
+                listener.set_window(open);
+                // 对话自己结束了（`miyu listen off` 关的那边已经响过、说过）。
+                if was_open && !open {
+                    if !switches.silenced.swap(false, Ordering::SeqCst) {
                         chime::play(&service.speaker, Chime::Off);
                         service.notifier.show(Notice::ConversationOff);
                     }
-                    was_open = open;
-                    for event in listener.feed(frame) {
-                        match event {
-                            Event::Wake { rest, .. } => {
-                                woken(&barge_core, &service.speaker);
-                                service.notifier.show(Notice::Listening);
-                                // 唤醒词后面紧跟着说了的，照样留一段窗口，等认字、交给她、她开始答。
-                                awaiting = Some((Instant::now(), AWAIT));
-                                if !rest.is_empty() {
-                                    let _ = utterances.send(rest);
-                                }
+                    // 对话时改了人格、预设的，这会儿另开会话。
+                    service.session_between_conversations(&barge_core);
+                }
+                was_open = open;
+                for event in listener.feed(frame) {
+                    match event {
+                        Event::Wake { rest, .. } => {
+                            woken(&barge_core, &service.speaker);
+                            service.notifier.show(Notice::Listening);
+                            // 唤醒词后面紧跟着说了的，照样留一段窗口，等认字、交给她、她开始答。
+                            awaiting = Some((Instant::now(), AWAIT));
+                            if !rest.is_empty() {
+                                let _ = utterances.send(rest);
                             }
-                            // 一句：交去认字。窗口再留一会儿，认字、交给她这段不关；没听清的这会儿里再说一次就行。
-                            Event::Speech(audio) => {
-                                awaiting = Some((Instant::now(), AWAIT));
-                                let _ = utterances.send(audio);
-                            }
-                            // 她正念着、你开口了：打断。麦克风里主要是她自己的声音时（回声没消干净）不算。打断要等核心回，
-                            // 另开线程，不耽误收麦。
-                            Event::Onset => {
-                                if service.switches.speaking.load(Ordering::SeqCst)
-                                    && !service.switches.mostly_echo.load(Ordering::SeqCst)
-                                    && let Some(conversation) = service.conversation()
-                                {
-                                    let core = barge_core.clone();
-                                    std::thread::spawn(move || conversation.barge_in(&core));
-                                }
+                        }
+                        // 一句：交去认字。窗口再留一会儿，认字、交给她这段不关；没听清的这会儿里再说一次就行。
+                        Event::Speech(audio) => {
+                            awaiting = Some((Instant::now(), AWAIT));
+                            let _ = utterances.send(audio);
+                        }
+                        // 她正念着、你开口了：打断。麦克风里主要是她自己的声音时（回声没消干净）不算。打断要等核心回，
+                        // 另开线程，不耽误收麦。
+                        Event::Onset => {
+                            if service.switches.speaking.load(Ordering::SeqCst)
+                                && !service.switches.mostly_echo.load(Ordering::SeqCst)
+                                && let Some(conversation) = service.conversation()
+                            {
+                                let core = barge_core.clone();
+                                std::thread::spawn(move || conversation.barge_in(&core));
                             }
                         }
                     }
-                },
-            );
+                }
+            });
         });
     }
 
@@ -388,31 +469,6 @@ fn woken(core: &Core, speaker: &Speaker) {
     let core = core.clone();
     std::thread::spawn(move || warm_up(&core));
     chime::play(speaker, Chime::Wake);
-}
-
-/// 照配置的唤醒词建听的那一套：编不了的跳过（说一句），一个都编不了的不建。
-fn build_listener(models: &Models, settings: &Settings) -> Result<Listener, String> {
-    let [.., tokens] = models.kws();
-    let vocabulary =
-        keywords::tokens(&std::fs::read_to_string(tokens).map_err(|error| error.to_string())?);
-    let mut lines = Vec::new();
-    for word in &settings.wake_words {
-        match keywords::encode(word, &vocabulary) {
-            Ok(encoded) => lines.extend(encoded),
-            Err(why) => eprintln!(
-                "miyu-voice-assistant: wake word \"{word}\" skipped: {}",
-                why.0
-            ),
-        }
-    }
-    Listener::new(
-        models,
-        &lines,
-        Sensitivity {
-            threshold: settings.threshold,
-            ..Sensitivity::default()
-        },
-    )
 }
 
 #[cfg(test)]

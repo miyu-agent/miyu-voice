@@ -12,6 +12,14 @@ fn every_step_reads_in_the_persons_language() {
     assert_eq!(text(&heard, "en", "Miyu").1, "You: 明天几点开会");
     assert_eq!(text(&Notice::Listening, "ja", "Miyu").0, "聞いています");
     assert_eq!(
+        text(&Notice::MicrophoneBack, "zh", "Miyu").0,
+        "麦克风恢复了"
+    );
+    assert!(
+        !Notice::MicrophoneBack.passing(),
+        "Windows and macOS show it too"
+    );
+    assert_eq!(
         text(&Notice::NotHeard, "fr", "Miyu").0,
         "Didn't catch that",
         "other languages fall back to English"

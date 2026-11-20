@@ -5,7 +5,9 @@
 //! （[`keywords`]），听（[`listen`]），收麦（[`capture`]），提示音（`voice_common::chime`）；会话那一段等核心 VA-1。
 
 mod capture;
+mod choice;
 mod conversation;
+mod ears;
 mod echo;
 mod keywords;
 mod listen;
@@ -51,7 +53,7 @@ fn serve() {
         eprintln!("miyu-voice-assistant: MIYU_CACHE_DIR is not set");
         std::process::exit(miyu_ext::EXIT_CONFIG);
     };
-    let service = service::Service::new(cache);
+    let service = service::Service::new(cache, dir("MIYU_STATE_DIR"));
     let mut ext = Extension::new("miyu-voice-assistant", env!("CARGO_PKG_VERSION"));
     service.register(&mut ext);
     let on_ready = std::sync::Arc::clone(&service);

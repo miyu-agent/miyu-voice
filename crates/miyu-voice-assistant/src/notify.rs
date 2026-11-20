@@ -38,8 +38,10 @@ pub enum Notice {
     Reply { text: String, done: bool },
     /// 哪一步出了错、为什么。
     Trouble(Step, String),
-    /// 麦克风开着，可连着 30 秒一点声音都没有（施工 VO-26）。
+    /// 麦克风开着，可连着 30 秒一点声音都没有（施工 VO-26）；助手每 30 秒关了重开（施工 VO-44）。
     SilentMicrophone,
+    /// 说过麦克风没有声音以后，又有了声音（施工 VO-44）。
+    MicrophoneBack,
 }
 
 /// 出错的那一步。
@@ -180,18 +182,8 @@ pub fn text(notice: &Notice, language: &str, name: &str) -> (String, String) {
             },
             tail(text, REPLY_CHARS),
         ),
-        Notice::SilentMicrophone => (
-            pick(
-                "麦克风没有声音",
-                "マイクから音が来ません",
-                "The microphone is silent",
-            ),
-            pick(
-                "30 秒一点声音都没有：麦克风可能被静音、没插好，或者系统的默认输入没有声音",
-                "30 秒間まったく音がありません。マイクのミュート、接続、システムの既定の入力を確かめてください",
-                "No sound at all for 30 s: the microphone may be muted or unplugged, or the system's default input carries no sound",
-            ),
-        ),
+        Notice::SilentMicrophone => microphone(false, language),
+        Notice::MicrophoneBack => microphone(true, language),
         Notice::Trouble(step, why) => {
             let title = match step {
                 Step::Microphone => pick(
@@ -222,6 +214,44 @@ pub fn text(notice: &Notice, language: &str, name: &str) -> (String, String) {
             (title, body)
         }
     }
+}
+
+/// 麦克风没有声音、恢复了（施工 VO-26、VO-44）的标题和正文；`back` 是恢复了。
+fn microphone(back: bool, language: &str) -> (String, String) {
+    let pick = |zh: &str, ja: &str, en: &str| -> String {
+        match language {
+            "zh" => zh,
+            "ja" => ja,
+            _ => en,
+        }
+        .to_string()
+    };
+    if back {
+        return (
+            pick(
+                "麦克风恢复了",
+                "マイクが戻りました",
+                "The microphone is back",
+            ),
+            pick(
+                "麦克风又有声音了，可以说唤醒词了。",
+                "マイクにまた音が届いています。",
+                "Sound is coming in from the microphone again.",
+            ),
+        );
+    }
+    (
+        pick(
+            "麦克风没有声音",
+            "マイクから音が来ません",
+            "The microphone is silent",
+        ),
+        pick(
+            "30 秒内一点声音都没有。麦克风可能被静音、没有插好，或者系统默认的输入设备没有声音。语音助手会每 30 秒重新打开一次麦克风。",
+            "30 秒間まったく音がありません。マイクのミュート、接続、システムの既定の入力を確かめてください。30 秒ごとにマイクを開き直します。",
+            "No sound at all for 30 s. The microphone may be muted or unplugged, or the system's default input carries no sound. The voice assistant reopens the microphone every 30 s.",
+        ),
+    )
 }
 
 /// 长的留最后 `chars` 个字，前面写省略号。

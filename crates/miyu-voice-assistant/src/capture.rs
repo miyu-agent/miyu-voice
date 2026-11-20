@@ -1,19 +1,24 @@
 //! 助手一直收着麦（设计 20 第九节）：助手在跑（包装着、没停用）、不是她在说话（第 7 步半双工）的时候，拿整机的麦克风锁、
-//! 开麦，转成 16 kHz、一帧帧交给听的那一套。有听写要麦（终端、命令行点了麦克风，[`MicLock::wanted`]）就关麦放锁，等它录完
+//! 开麦，转成 16 kHz、一帧帧交给听的那一套。有听写要麦（终端、命令行点了麦克风，[`voice_common::mic_lock::MicLock::wanted`]）就关麦放锁，等它录完
 //! 再拿（第九节「一个麦克风两个人用」）。她在说话的时候：开着「说话时可以打断 AI」的（默认）麦照样收，收到的先过回声消除
 //! （[`crate::echo`]，施工 VO-20），不把她自己的声音当成你说的；关了的麦是关着的。
+//!
+//! 麦克风开着、可连着 30 秒都是数字静音（全零）的，关了重开、重新取设备（施工 VO-44，项目主人 2026-11-20 验收第 4 条：常驻的
+//! 录音一直全零，同时语音输入、`miyu listen` 新开的录音都正常，关开一次助手就好）。第一次弹「麦克风没有声音」，之后每 30 秒
+//! 重开一次、不再弹；又有了声音弹「麦克风恢复了」。设置页换了麦克风的也当场关了重开。
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use sherpa_onnx::LinearResampler;
-use voice_common::mic::Mic;
-use voice_common::mic_lock::MicLock;
 
 use crate::echo::{Echo, Played};
 use crate::listen::RATE;
-use crate::notify::{Notice, Notifier, Step};
+use crate::notify::{Notice, Step};
+
+mod microphone;
+pub use microphone::{Held, Input, Microphone, System};
 
 /// 一帧多少个采样（16 kHz 下 32 毫秒，同人声检测的窗）。
 pub const FRAME: usize = 512;
@@ -44,6 +49,8 @@ pub struct Switches {
     pub played: Played,
     /// 整个程序要退了。
     pub quit: Arc<AtomicBool>,
+    /// 设置页换了麦克风：拿着的关了、照新的重开（施工 VO-44）。
+    pub reopen: Arc<AtomicBool>,
 }
 
 impl Switches {
@@ -52,24 +59,20 @@ impl Switches {
     }
 }
 
-/// 一直跑到 `quit`：该收的时候收，一帧帧交给 `frame`。`device` 是麦克风的设备名。
+/// 一直跑到 `quit`：该收的时候收，一帧帧交给 `frame`。`device` 交回现在配置的麦克风设备名（每次开麦时问，`None` 用默认的）；
+/// `say` 弹给人看的通知。
 ///
 /// 测试用：设了 `MIYU_VOICE_TEST_MIC`（一个 16 kHz 单声道的 wav）的不开麦，照实时的快慢把这个文件「听」一遍，前面垫
 /// `MIYU_VOICE_TEST_MIC_LEAD` 秒（不设是两秒）、后面垫两秒安静，再往后一直是安静（端到端测试不碰主人的麦克风，施工 VO-11下、
 /// VO-14）。另设了 `MIYU_VOICE_TEST_MIC_CUT_IN`（同样的 wav）的，
 /// 她第一次开口念的时候把它「听」一遍，测开口就打断（施工 VO-12；关了「说话时可以打断 AI」的收不到）。
 pub fn run(
-    device: Option<&str>,
+    device: &dyn Fn() -> Option<String>,
     switches: &Switches,
-    notifier: &Notifier,
+    say: &dyn Fn(Notice),
     mut frame: impl FnMut(&[f32]),
 ) {
-    let mut frames = Frames {
-        echo: Echo::new(switches.played.clone(), Arc::clone(&switches.mostly_echo)),
-        pending: Vec::new(),
-        silence: Silence::default(),
-        notifier,
-    };
+    let mut frames = Frames::new(switches, say);
     if let Some(path) = std::env::var_os("MIYU_VOICE_TEST_MIC") {
         play_file(
             &std::path::PathBuf::from(path),
@@ -79,115 +82,182 @@ pub fn run(
         );
         return;
     }
+    hold_and_listen(&mut System, device, switches, &mut frames, &mut frame);
+}
+
+/// 拿麦、收、放麦，一直到 `quit`：开不了的过一会儿再试（同一句只说一次）；拿着的那一段完了（有人要麦、换了麦克风、一直数字
+/// 静音）关了重开。
+fn hold_and_listen<M: Microphone>(
+    microphone: &mut M,
+    device: &dyn Fn() -> Option<String>,
+    switches: &Switches,
+    frames: &mut Frames<'_>,
+    frame: &mut impl FnMut(&[f32]),
+) {
     let mut warned = None::<String>;
     while !switches.quit.load(Ordering::SeqCst) {
         if !switches.wanted() {
             std::thread::sleep(CHECK);
             continue;
         }
-        let Some(lock) = MicLock::for_assistant() else {
-            std::thread::sleep(RETRY);
-            continue;
-        };
-        let mic = match Mic::open(device) {
-            Ok(mic) => mic,
-            Err(why) => {
+        switches.reopen.store(false, Ordering::SeqCst);
+        let input = match microphone.hold(device().as_deref()) {
+            Held::Open(input) => input,
+            Held::Busy => {
+                std::thread::sleep(RETRY);
+                continue;
+            }
+            Held::Failed(why) => {
                 // 同一句只说一次，免得没插麦的机器把日志写满。
                 if warned.as_deref() != Some(why.as_str()) {
                     eprintln!("miyu-voice-assistant: {why}");
-                    notifier.show(Notice::Trouble(Step::Microphone, why.clone()));
+                    (frames.say)(Notice::Trouble(Step::Microphone, why.clone()));
                     warned = Some(why);
                 }
-                drop(lock);
                 std::thread::sleep(RETRY * 4);
                 continue;
             }
         };
         warned = None;
-        listen_while_held(&mic, switches, &mut frames, &mut frame);
-        drop(mic);
-        drop(lock);
+        listen_while_held(microphone, &input, switches, frames, frame);
     }
 }
 
-/// 收到的 16 kHz 的声音过回声消除、切成一帧帧；连着 [`SILENT_FOR`] 都是数字静音的说一次（[`Silence`]）。
+/// 收到的 16 kHz 的声音过回声消除、切成一帧帧；数着数字静音（[`Silence`]）。
 struct Frames<'a> {
     echo: Echo,
     pending: Vec<f32>,
     silence: Silence,
-    notifier: &'a Notifier,
+    say: &'a dyn Fn(Notice),
 }
 
-impl Frames<'_> {
-    fn feed(&mut self, heard: &[f32], frame: &mut impl FnMut(&[f32])) {
-        if self.silence.heard(heard) {
-            eprintln!("miyu-voice-assistant: the microphone has been digitally silent for 30 s");
-            self.notifier.show(Notice::SilentMicrophone);
+impl<'a> Frames<'a> {
+    fn new(switches: &Switches, say: &'a dyn Fn(Notice)) -> Frames<'a> {
+        Frames {
+            echo: Echo::new(switches.played.clone(), Arc::clone(&switches.mostly_echo)),
+            pending: Vec::new(),
+            silence: Silence::default(),
+            say,
         }
+    }
+
+    /// 收一块：交回 `true` 的是连着 [`SILENT_FOR`] 都是数字静音，该关了麦克风重开。
+    fn feed(&mut self, heard: &[f32], frame: &mut impl FnMut(&[f32])) -> bool {
+        let stuck = match self.silence.heard(heard) {
+            Heard::Stuck { first } => {
+                if first {
+                    eprintln!(
+                        "miyu-voice-assistant: the microphone has been digitally silent for 30 s; reopening it every 30 s until sound comes in"
+                    );
+                    (self.say)(Notice::SilentMicrophone);
+                }
+                true
+            }
+            Heard::Back => {
+                eprintln!("miyu-voice-assistant: sound is coming in from the microphone again");
+                (self.say)(Notice::MicrophoneBack);
+                false
+            }
+            Heard::Sound | Heard::Quiet => false,
+        };
         self.pending.extend(self.echo.clean(heard));
         let whole = self.pending.len() / FRAME * FRAME;
         for piece in self.pending[..whole].chunks(FRAME) {
             frame(piece);
         }
         self.pending.drain(..whole);
+        stuck
     }
 }
 
-/// 连着多久都是数字静音才说（施工 VO-26）：正常的麦克风哪怕没人说话也有底噪，一直是零的是麦克风那头没声音。
+/// 连着多久都是数字静音才算麦克风那头没声音（施工 VO-26）：正常的麦克风哪怕没人说话也有底噪，一直是零的是麦克风那头没声音。
 const SILENT_FOR: usize = RATE * 30;
 
-/// 数一数连着多少个样本是数字静音（[`voice_common::audio::silent`]）；到 [`SILENT_FOR`] 交回一次 `true`，有了声音重新数。
+/// 数一数连着多少个样本是数字静音（[`voice_common::audio::silent`]）。
 #[derive(Debug, Default)]
 struct Silence {
     run: usize,
+    /// 这一段静音说过了（弹过「麦克风没有声音」）。
     said: bool,
 }
 
+/// 收到的一块算什么。
+#[derive(Debug, PartialEq, Eq)]
+enum Heard {
+    /// 有声音。
+    Sound,
+    /// 数字静音，还没连着满 [`SILENT_FOR`]。
+    Quiet,
+    /// 连着满了 [`SILENT_FOR`]（重新数）：该重开；`first` 是这一段静音头一回满。
+    Stuck { first: bool },
+    /// 说过没有声音以后，又有了声音。
+    Back,
+}
+
 impl Silence {
-    fn heard(&mut self, samples: &[f32]) -> bool {
+    fn heard(&mut self, samples: &[f32]) -> Heard {
         if !voice_common::audio::silent(samples) {
-            (self.run, self.said) = (0, false);
-            return false;
+            self.run = 0;
+            return if std::mem::take(&mut self.said) {
+                Heard::Back
+            } else {
+                Heard::Sound
+            };
         }
         self.run += samples.len();
-        if self.run >= SILENT_FOR && !self.said {
-            self.said = true;
-            return true;
+        if self.run < SILENT_FOR {
+            return Heard::Quiet;
         }
-        false
+        self.run = 0;
+        Heard::Stuck {
+            first: !std::mem::replace(&mut self.said, true),
+        }
     }
 }
 
-/// 拿着麦的这一段：收、转、消回声、切帧，直到有人要麦、关了、她开口（关了「说话时可以打断 AI」的）、设备出错。
-fn listen_while_held(
-    mic: &Mic,
+/// 拿着麦的这一段：收、转、消回声、切帧，直到有人要麦、关了、她开口（关了「说话时可以打断 AI」的）、设备出错、换了麦克风、
+/// 一直数字静音。
+fn listen_while_held<M: Microphone>(
+    microphone: &M,
+    input: &M::Input,
     switches: &Switches,
     frames: &mut Frames<'_>,
     frame: &mut impl FnMut(&[f32]),
 ) {
-    let rate = i32::try_from(mic.rate).unwrap_or(48_000);
-    let resampler = (mic.rate as usize != RATE)
+    let rate = i32::try_from(input.rate()).unwrap_or(48_000);
+    let resampler = (input.rate() as usize != RATE)
         .then(|| LinearResampler::create(rate, 16_000))
         .flatten();
     frames.pending.clear();
     let mut checked = Instant::now();
     loop {
+        if !switches.wanted() || switches.quit.load(Ordering::SeqCst) {
+            return;
+        }
+        if switches.reopen.load(Ordering::SeqCst) {
+            eprintln!("miyu-voice-assistant: the microphone setting changed; reopening it");
+            return;
+        }
+        // 有没有听写在等麦要查文件，隔一会儿查一次。
         if checked.elapsed() >= CHECK {
             checked = Instant::now();
-            if MicLock::wanted() || !switches.wanted() || switches.quit.load(Ordering::SeqCst) {
+            if microphone.wanted_elsewhere() {
                 return;
             }
         }
-        if let Some(why) = mic.failure() {
+        if let Some(why) = input.failure() {
             eprintln!("miyu-voice-assistant: {why}");
             return;
         }
-        let Ok(chunk) = mic.chunks.recv_timeout(Duration::from_millis(50)) else {
+        let Some(chunk) = input.next(Duration::from_millis(50)) else {
             continue;
         };
-        match &resampler {
+        let stuck = match &resampler {
             Some(resampler) => frames.feed(&resampler.resample(&chunk, false), frame),
             None => frames.feed(&chunk, frame),
+        };
+        if stuck {
+            return;
         }
     }
 }
@@ -229,7 +299,8 @@ fn play_file(
             audio.extend(std::mem::take(&mut cut_in));
         }
         let piece = audio.get(at..at + FRAME).unwrap_or(&silence);
-        frames.feed(piece, frame);
+        // 测试的「麦克风」重开不了，一直静音也照样往下放。
+        let _ = frames.feed(piece, frame);
         at += FRAME;
         std::thread::sleep(Duration::from_millis(32));
     }
