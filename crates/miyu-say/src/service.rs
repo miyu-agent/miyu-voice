@@ -87,7 +87,9 @@ impl Service {
             Some(other) => return Err(bad(&format!("Unknown format {other}."))),
         };
         let text = params["text"].as_str().ok_or_else(|| bad("Give text."))?;
-        let audio = self.speak(core, text, params["persona"].as_str(), format)?;
+        let audio = self
+            .speak(core, text, params["persona"].as_str(), format)?
+            .audio;
         let name = format!("speech.{}", format.as_str());
         let blob = blobs::put(core, &audio.bytes, &name, &audio.media_type).map_err(|error| {
             MethodError::new(
@@ -110,6 +112,7 @@ impl Service {
             }
             (None, Some(text)) => {
                 self.speak(core, text, params["persona"].as_str(), Format::Wav)?
+                    .audio
                     .bytes
             }
             _ => return Err(bad("Give audio or text, not both.")),
@@ -121,18 +124,25 @@ impl Service {
         Ok(json!({"finished": finished}))
     }
 
-    /// 照配置合成一段：这个人格的音色、语速。
+    /// 照配置合成一段：这个人格的音色、语速。配的音色这家引擎没有、退回了默认的，标准错误里说一句（[`say::Said`]）。
     pub fn speak(
         &self,
         core: &Core,
         text: &str,
         persona: Option<&str>,
         format: Format,
-    ) -> Result<crate::engine::Audio, MethodError> {
+    ) -> Result<say::Said, MethodError> {
         let settings = self.settings();
         let (voice, speed) = settings.voice_for(persona);
-        say::synthesize(settings.engine(core).as_ref(), text, &voice, speed, format)
-            .map_err(|error| MethodError::new(error.code(), error.message()))
+        let said = say::synthesize(settings.engine(core).as_ref(), text, &voice, speed, format)
+            .map_err(|error| MethodError::new(error.code(), error.message()))?;
+        if let Some(voice) = &said.unknown_voice {
+            eprintln!(
+                "miyu-say: the engine {} has no voice {voice}; its default voice was used",
+                settings.engine
+            );
+        }
+        Ok(said)
     }
 }
 

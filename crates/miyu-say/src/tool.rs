@@ -72,12 +72,15 @@ fn done(service: &Arc<Service>, args: &Value, call: &Call) -> Result<Reply, Stri
         return Err("No workspace for this turn.".to_string());
     }
     // 照这一轮的人格挑音色（核心 TC-1 起 tool.call 带 persona）；没有人格、没给它配的用默认音色。
-    let audio = service
+    let said = service
         .speak(call.core(), text, call.persona(), Format::Mp3)
         .map_err(|error| error.message)?;
+    let note = said.unknown_voice.as_deref().map(default_voice_note);
+    let audio = said.audio;
     let duration_ms = audio.duration_ms.or_else(|| wav_duration(&audio));
     if file_only {
-        return save(call.cwd(), &audio, duration_ms).map(Reply::text);
+        return save(call.cwd(), &audio, duration_ms)
+            .map(|saved| Reply::text(saved + note.as_deref().unwrap_or_default()));
     }
     if let (Some(limit), Some(ms)) = (call.voice_max_ms(), duration_ms)
         && ms > limit
@@ -96,11 +99,16 @@ fn done(service: &Arc<Service>, args: &Value, call: &Call) -> Result<Reply, Stri
     if let Some(ms) = duration_ms {
         voice["duration_ms"] = ms.into();
     }
-    let said = match duration_ms {
+    let spoken = match duration_ms {
         Some(ms) => format!("Spoken ({}).", seconds(ms)),
         None => "Spoken.".to_string(),
     };
-    Ok(Reply::text(said).sent(json!([voice])))
+    Ok(Reply::text(spoken + note.as_deref().unwrap_or_default()).sent(json!([voice])))
+}
+
+/// 配的音色这家引擎没有、用了它的默认音色（施工 VO-45）：接在结果后面的一句，记在 `docs/prompt-ledger.md`。
+fn default_voice_note(voice: &str) -> String {
+    format!(" Default voice used: this engine has no voice {voice}.")
 }
 
 /// `file_only`：存进工作区的 `audio/`，交回相对路径和时长。

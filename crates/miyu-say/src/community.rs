@@ -50,6 +50,11 @@ impl Engine for Community {
             .map(|answer| voices_in(&answer))
             .unwrap_or_default()
     }
+
+    /// `tts.engine.voices` 是引擎自己列的全部音色。
+    fn lists_every_voice(&self) -> bool {
+        true
+    }
 }
 
 impl Community {

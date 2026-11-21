@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use super::{ends, extension, seconds, short_hash, store, too_long};
+use super::{default_voice_note, ends, extension, seconds, short_hash, store, too_long};
 
 #[test]
 fn audio_is_stored_under_its_hash_and_no_temp_is_left() {
@@ -96,5 +96,14 @@ fn the_tool_says_it_ends_the_turn() {
     assert_eq!(
         super::schema()["properties"]["end"]["description"],
         "Default true, false with file_only."
+    );
+}
+
+/// 用了引擎的默认音色时结果后面补的一句（施工 VO-45，登记簿记着 token）。
+#[test]
+fn the_default_voice_note_names_the_missing_voice() {
+    assert_eq!(
+        format!("Spoken (2.3 s).{}", default_voice_note("female-shaonv")),
+        "Spoken (2.3 s). Default voice used: this engine has no voice female-shaonv."
     );
 }

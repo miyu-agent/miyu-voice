@@ -103,4 +103,10 @@ pub trait Engine: Send + Sync {
 
     /// 有哪些音色；列不出来的交回空的，配置页让人手填。
     fn voices(&self) -> Vec<Voice>;
+
+    /// [`Engine::voices`] 列的是不是它全部的音色（施工 VO-45）：是的，配的音色不在里头就退回它的默认；不是的（MiniMax 克隆的
+    /// 音色、兼容 OpenAI 的各家都不在列表里）照配的交。
+    fn lists_every_voice(&self) -> bool {
+        false
+    }
 }

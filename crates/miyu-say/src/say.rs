@@ -42,7 +42,16 @@ impl SayError {
     }
 }
 
-/// 把 `markdown` 合成一段音频。
+/// 合成好的一段。
+#[derive(Debug)]
+pub struct Said {
+    /// 音频。
+    pub audio: Audio,
+    /// 配的音色这家引擎没有、用了它的默认音色时，配的是哪个（施工 VO-45：换了引擎，音色还是上一家的编号，原来引擎直接拒）。
+    pub unknown_voice: Option<String>,
+}
+
+/// 把 `markdown` 合成一段音频。配的音色不在引擎列的全部音色里（[`Engine::lists_every_voice`]）的，交空的让引擎用默认。
 ///
 /// # Errors
 ///
@@ -53,7 +62,7 @@ pub fn synthesize(
     voice: &str,
     speed: f32,
     format: Format,
-) -> Result<Audio, SayError> {
+) -> Result<Said, SayError> {
     let text = speakable::to_speech(markdown);
     if text.is_empty() {
         return Err(SayError::EmptyText);
@@ -61,6 +70,11 @@ pub fn synthesize(
     if text.chars().count() > LONGEST_CHARS {
         return Err(SayError::TooLong);
     }
+    let unknown_voice = (!voice.is_empty() && engine.lists_every_voice())
+        .then(|| engine.voices())
+        .filter(|voices| !voices.is_empty() && voices.iter().all(|known| known.id != voice))
+        .map(|_| voice.to_string());
+    let voice = if unknown_voice.is_some() { "" } else { voice };
     let mut audio = engine
         .synthesize(&Request {
             text,
@@ -72,7 +86,10 @@ pub fn synthesize(
     if let Some(real) = sniffed(&audio.bytes) {
         audio.media_type = real.to_string();
     }
-    Ok(audio)
+    Ok(Said {
+        audio,
+        unknown_voice,
+    })
 }
 
 /// 照开头几个字节认真实的格式（施工 VO-35）：几家引擎照「要的格式」报类型，可本机的 GPT-SoVITS 这类不管要什么都回 wav，
