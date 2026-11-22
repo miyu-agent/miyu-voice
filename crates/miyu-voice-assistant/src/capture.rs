@@ -3,9 +3,8 @@
 //! 再拿（第九节「一个麦克风两个人用」）。她在说话的时候：开着「说话时可以打断 AI」的（默认）麦照样收，收到的先过回声消除
 //! （[`crate::echo`]，施工 VO-20），不把她自己的声音当成你说的；关了的麦是关着的。
 //!
-//! 麦克风开着、可连着 30 秒都是数字静音（全零）的，关了重开、重新取设备（施工 VO-44，项目主人 2026-11-20 验收第 4 条：常驻的
-//! 录音一直全零，同时语音输入、`miyu listen` 新开的录音都正常，关开一次助手就好）。第一次弹「麦克风没有声音」，之后每 30 秒
-//! 重开一次、不再弹；又有了声音弹「麦克风恢复了」。设置页换了麦克风的也当场关了重开。
+//! 拿着麦就一直听，不按收到的声音大小判麦克风坏没坏（施工 VO-47，项目主人 2026-11-22 定：安静的房间、降噪过的麦克风本来就
+//! 近乎全零，以前连着 30 秒全零就弹通知、关了重开，是误报）。设置页换了麦克风的当场关了重开（施工 VO-44）。
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -85,8 +84,8 @@ pub fn run(
     hold_and_listen(&mut System, device, switches, &mut frames, &mut frame);
 }
 
-/// 拿麦、收、放麦，一直到 `quit`：开不了的过一会儿再试（同一句只说一次）；拿着的那一段完了（有人要麦、换了麦克风、一直数字
-/// 静音）关了重开。
+/// 拿麦、收、放麦，一直到 `quit`：开不了的过一会儿再试（同一句只说一次）；拿着的那一段完了（有人要麦、换了麦克风、设备
+/// 出错）关了重开。
 fn hold_and_listen<M: Microphone>(
     microphone: &mut M,
     device: &dyn Fn() -> Option<String>,
@@ -123,11 +122,10 @@ fn hold_and_listen<M: Microphone>(
     }
 }
 
-/// 收到的 16 kHz 的声音过回声消除、切成一帧帧；数着数字静音（[`Silence`]）。
+/// 收到的 16 kHz 的声音过回声消除、切成一帧帧。
 struct Frames<'a> {
     echo: Echo,
     pending: Vec<f32>,
-    silence: Silence,
     say: &'a dyn Fn(Notice),
 }
 
@@ -136,87 +134,22 @@ impl<'a> Frames<'a> {
         Frames {
             echo: Echo::new(switches.played.clone(), Arc::clone(&switches.mostly_echo)),
             pending: Vec::new(),
-            silence: Silence::default(),
             say,
         }
     }
 
-    /// 收一块：交回 `true` 的是连着 [`SILENT_FOR`] 都是数字静音，该关了麦克风重开。
-    fn feed(&mut self, heard: &[f32], frame: &mut impl FnMut(&[f32])) -> bool {
-        let stuck = match self.silence.heard(heard) {
-            Heard::Stuck { first } => {
-                if first {
-                    eprintln!(
-                        "miyu-voice-assistant: the microphone has been digitally silent for 30 s; reopening it every 30 s until sound comes in"
-                    );
-                    (self.say)(Notice::SilentMicrophone);
-                }
-                true
-            }
-            Heard::Back => {
-                eprintln!("miyu-voice-assistant: sound is coming in from the microphone again");
-                (self.say)(Notice::MicrophoneBack);
-                false
-            }
-            Heard::Sound | Heard::Quiet => false,
-        };
+    /// 收一块。
+    fn feed(&mut self, heard: &[f32], frame: &mut impl FnMut(&[f32])) {
         self.pending.extend(self.echo.clean(heard));
         let whole = self.pending.len() / FRAME * FRAME;
         for piece in self.pending[..whole].chunks(FRAME) {
             frame(piece);
         }
         self.pending.drain(..whole);
-        stuck
     }
 }
 
-/// 连着多久都是数字静音才算麦克风那头没声音（施工 VO-26）：正常的麦克风哪怕没人说话也有底噪，一直是零的是麦克风那头没声音。
-const SILENT_FOR: usize = RATE * 30;
-
-/// 数一数连着多少个样本是数字静音（[`voice_common::audio::silent`]）。
-#[derive(Debug, Default)]
-struct Silence {
-    run: usize,
-    /// 这一段静音说过了（弹过「麦克风没有声音」）。
-    said: bool,
-}
-
-/// 收到的一块算什么。
-#[derive(Debug, PartialEq, Eq)]
-enum Heard {
-    /// 有声音。
-    Sound,
-    /// 数字静音，还没连着满 [`SILENT_FOR`]。
-    Quiet,
-    /// 连着满了 [`SILENT_FOR`]（重新数）：该重开；`first` 是这一段静音头一回满。
-    Stuck { first: bool },
-    /// 说过没有声音以后，又有了声音。
-    Back,
-}
-
-impl Silence {
-    fn heard(&mut self, samples: &[f32]) -> Heard {
-        if !voice_common::audio::silent(samples) {
-            self.run = 0;
-            return if std::mem::take(&mut self.said) {
-                Heard::Back
-            } else {
-                Heard::Sound
-            };
-        }
-        self.run += samples.len();
-        if self.run < SILENT_FOR {
-            return Heard::Quiet;
-        }
-        self.run = 0;
-        Heard::Stuck {
-            first: !std::mem::replace(&mut self.said, true),
-        }
-    }
-}
-
-/// 拿着麦的这一段：收、转、消回声、切帧，直到有人要麦、关了、她开口（关了「说话时可以打断 AI」的）、设备出错、换了麦克风、
-/// 一直数字静音。
+/// 拿着麦的这一段：收、转、消回声、切帧，直到有人要麦、关了、她开口（关了「说话时可以打断 AI」的）、设备出错、换了麦克风。
 fn listen_while_held<M: Microphone>(
     microphone: &M,
     input: &M::Input,
@@ -252,12 +185,9 @@ fn listen_while_held<M: Microphone>(
         let Some(chunk) = input.next(Duration::from_millis(50)) else {
             continue;
         };
-        let stuck = match &resampler {
+        match &resampler {
             Some(resampler) => frames.feed(&resampler.resample(&chunk, false), frame),
             None => frames.feed(&chunk, frame),
-        };
-        if stuck {
-            return;
         }
     }
 }
@@ -299,8 +229,7 @@ fn play_file(
             audio.extend(std::mem::take(&mut cut_in));
         }
         let piece = audio.get(at..at + FRAME).unwrap_or(&silence);
-        // 测试的「麦克风」重开不了，一直静音也照样往下放。
-        let _ = frames.feed(piece, frame);
+        frames.feed(piece, frame);
         at += FRAME;
         std::thread::sleep(Duration::from_millis(32));
     }

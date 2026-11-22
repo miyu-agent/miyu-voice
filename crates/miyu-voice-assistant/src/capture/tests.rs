@@ -22,56 +22,11 @@ fn the_microphone_is_wanted_unless_she_speaks_without_headphones() {
     );
 }
 
-/// 连着 30 秒数字静音算卡住一次（该重开），头一回才说；有一点声音就重新数、说一声恢复了（施工 VO-26、VO-44）。
-#[test]
-fn every_thirty_seconds_of_digital_silence_is_stuck_but_said_once() {
-    use super::{FRAME, Heard, SILENT_FOR, Silence};
-    let block = vec![0.0f32; FRAME];
-    let mut silence = Silence::default();
-    let blocks = SILENT_FOR.div_ceil(FRAME);
-    let heard: Vec<Heard> = (0..blocks * 3)
-        .map(|_| silence.heard(&block))
-        .filter(|heard| *heard != Heard::Quiet)
-        .collect();
-    assert_eq!(
-        heard,
-        [
-            Heard::Stuck { first: true },
-            Heard::Stuck { first: false },
-            Heard::Stuck { first: false }
-        ],
-        "stuck every 30 s, said once"
-    );
-    assert_eq!(
-        silence.heard(&[0.0, 0.2, 0.0]),
-        Heard::Back,
-        "a sound ends it"
-    );
-    assert_eq!(silence.heard(&[0.0, 0.2, 0.0]), Heard::Sound);
-    let again: Vec<Heard> = (0..blocks)
-        .map(|_| silence.heard(&block))
-        .filter(|heard| *heard != Heard::Quiet)
-        .collect();
-    assert_eq!(
-        again,
-        [Heard::Stuck { first: true }],
-        "said again for a new stretch"
-    );
-    let mut room = Silence::default();
-    let noise: Vec<f32> = (0..FRAME)
-        .map(|i| if i % 2 == 0 { 0.001 } else { -0.001 })
-        .collect();
-    assert!(
-        (0..blocks * 2).all(|_| room.heard(&noise) == Heard::Sound),
-        "a quiet room is not silent"
-    );
-}
-
-/// 假的麦克风：每开一次记一笔、记下问到的设备；`silent_opens` 次以内开出来的一直吐全零，之后的吐底噪。开着的一个交满
-/// 100 秒（一块 1 秒）就让整个程序退：一直不重开的，开一次就到头了。
+/// 假的麦克风：每开一次记一笔、记下问到的设备；`silent` 的一直吐全零，不然吐底噪。一共交满 100 秒（一块 1 秒）就让整个程序
+/// 退，开了几次都算在一起。
 struct FakeMicrophone {
     opens: usize,
-    silent_opens: usize,
+    silent: bool,
     quit: std::sync::Arc<std::sync::atomic::AtomicBool>,
     devices: Vec<Option<String>>,
     /// 一共交出去几块。
@@ -79,10 +34,10 @@ struct FakeMicrophone {
 }
 
 impl FakeMicrophone {
-    fn new(switches: &Switches, silent_opens: usize) -> FakeMicrophone {
+    fn new(switches: &Switches, silent: bool) -> FakeMicrophone {
         FakeMicrophone {
             opens: 0,
-            silent_opens,
+            silent,
             quit: std::sync::Arc::clone(&switches.quit),
             devices: Vec::new(),
             delivered: std::rc::Rc::default(),
@@ -92,7 +47,6 @@ impl FakeMicrophone {
 
 struct FakeInput {
     silent: bool,
-    left: std::cell::Cell<usize>,
     quit: std::sync::Arc<std::sync::atomic::AtomicBool>,
     delivered: std::rc::Rc<std::cell::Cell<usize>>,
 }
@@ -104,8 +58,7 @@ impl super::Microphone for FakeMicrophone {
         self.opens += 1;
         self.devices.push(device.map(str::to_string));
         super::Held::Open(FakeInput {
-            silent: self.opens <= self.silent_opens,
-            left: std::cell::Cell::new(100),
+            silent: self.silent,
             quit: std::sync::Arc::clone(&self.quit),
             delivered: std::rc::Rc::clone(&self.delivered),
         })
@@ -122,12 +75,10 @@ impl super::Input for FakeInput {
     }
 
     fn next(&self, _: std::time::Duration) -> Option<Vec<f32>> {
-        let left = self.left.get();
-        if left == 0 {
+        if self.delivered.get() >= 100 {
             self.quit.store(true, Ordering::SeqCst);
             return None;
         }
-        self.left.set(left - 1);
         self.delivered.set(self.delivered.get() + 1);
         Some(if self.silent {
             vec![0.0; 16_000]
@@ -143,42 +94,40 @@ impl super::Input for FakeInput {
     }
 }
 
-/// 常驻的录音一直全零（项目主人 11-20 验收第 4 条）：30 秒就关了重开、重新问设备，弹一次「麦克风没有声音」；重开以后有了声音
-/// 弹「麦克风恢复了」。
+/// 一直全零的麦克风也一直开着听（施工 VO-47，项目主人 2026-11-22 定：安静的房间、降噪过的麦克风本来就近乎全零）：只开一次、
+/// 100 秒都交给听的那一套，不弹通知。
 #[test]
-fn a_digitally_silent_microphone_is_reopened_and_said_once() {
+fn a_digitally_silent_microphone_stays_open_without_a_notice() {
     use crate::notify::Notice;
     let switches = Switches::default();
-    let mut microphone = FakeMicrophone::new(&switches, 3);
-    let notices = std::cell::RefCell::new(Vec::new());
+    let mut microphone = FakeMicrophone::new(&switches, true);
+    let notices = std::cell::RefCell::new(Vec::<Notice>::new());
     let say = |notice: Notice| notices.borrow_mut().push(notice);
     let mut frames = super::Frames::new(&switches, &say);
-    let device = || Some("usb-mic".to_string());
+    let device = || None;
+    let mut heard = 0;
     super::hold_and_listen(
         &mut microphone,
         &device,
         &switches,
         &mut frames,
-        &mut |_| {},
+        &mut |_| heard += 1,
     );
-    assert_eq!(microphone.opens, 4, "reopened after each 30 s of zeros");
+    assert_eq!(microphone.opens, 1, "never reopened");
+    assert_eq!(microphone.delivered.get(), 100);
     assert_eq!(
-        microphone.devices,
-        vec![Some("usb-mic".to_string()); 4],
-        "asks for the configured device each time"
+        heard,
+        100 * 16_000 / super::FRAME,
+        "every frame is listened to"
     );
-    assert_eq!(
-        *notices.borrow(),
-        [Notice::SilentMicrophone, Notice::MicrophoneBack],
-        "said once, and again when sound came back"
-    );
+    assert!(notices.borrow().is_empty(), "{:?}", notices.borrow());
 }
 
 /// 设置页换了麦克风：拿着的这一个当场关了、照新的设备重开（施工 VO-44）。
 #[test]
 fn a_new_microphone_setting_reopens_the_microphone() {
     let switches = Switches::default();
-    let mut microphone = FakeMicrophone::new(&switches, 0);
+    let mut microphone = FakeMicrophone::new(&switches, false);
     let say = |_| {};
     let mut frames = super::Frames::new(&switches, &say);
     let reopen = std::sync::Arc::clone(&switches.reopen);
