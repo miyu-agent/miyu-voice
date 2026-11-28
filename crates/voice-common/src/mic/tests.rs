@@ -190,3 +190,34 @@ fn the_capture_buffer_is_about_twenty_milliseconds() {
         BufferSize::Default
     );
 }
+
+/// 施工 VO-49：空设备那样比实时快得多的声源（`poll()` 永远就绪），加上一个卡住不收的收麦线程。原来的通道没有上限，交多少
+/// 留多少（60 秒就是 2,880,000 个样本、11 MB，空设备上 2 秒涨到 1 GB）；现在最多留 2 秒，留下的是最新的。
+#[test]
+fn a_stuck_listener_keeps_only_the_newest_two_seconds_of_a_runaway_microphone() {
+    let rate = 48_000_u32;
+    let block = 960; // 20 毫秒
+    let (mut sender, chunks) = super::pipe(rate);
+    let blocks = 60 * 50;
+    let feeding = std::thread::spawn(move || {
+        for n in 0..blocks {
+            sender.send_without_waiting(vec![f32::from(u16::try_from(n).unwrap()); block]);
+        }
+        sender
+    });
+    let mut most = 0;
+    while !feeding.is_finished() {
+        most = most.max(chunks.queued());
+    }
+    let sender = feeding.join().unwrap();
+    most = most.max(chunks.queued());
+    let limit = 2 * usize::try_from(rate).unwrap();
+    assert!(most <= limit, "queued {most} samples, limit {limit}");
+    drop(sender);
+    let kept: Vec<Vec<f32>> = std::iter::from_fn(|| chunks.try_recv()).collect();
+    assert_eq!(kept.len(), limit / block);
+    assert_eq!(
+        kept.last().map(|last| last[0]),
+        Some(f32::from(u16::try_from(blocks - 1).unwrap()))
+    );
+}

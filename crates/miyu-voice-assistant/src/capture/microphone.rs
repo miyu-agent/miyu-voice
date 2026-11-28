@@ -67,7 +67,7 @@ impl Input for Opened {
     }
 
     fn next(&self, wait: Duration) -> Option<Vec<f32>> {
-        self.mic.chunks.recv_timeout(wait).ok()
+        self.mic.chunks.recv_timeout(wait)
     }
 
     fn failure(&self) -> Option<String> {

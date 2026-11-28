@@ -2,11 +2,15 @@
 //! 有声音服务（PipeWire、PulseAudio）的经它开，不直接占声卡，没有的经 ALSA（施工 VO-22）。几个声道平均
 //! 成一个，一块块交出来。听写和助手共用；锁不在这里（[`crate::mic_lock`]）。
 
-use std::sync::mpsc;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample};
+
+use crate::newest;
+
+/// 收音回调交给收麦线程的最多留几秒（施工 VO-49）：收的那一头卡住的，再多的丢最旧的，卡完听到的总是最新的这几秒。
+const KEPT_SECONDS: usize = 2;
 
 /// 系统是照哪一套列设备的。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,8 +125,8 @@ pub fn choices(language: &str) -> serde_json::Value {
 
 /// 开着的麦克风：丢掉就关。
 pub struct Mic {
-    /// 收到的声音，单声道、原采样率。
-    pub chunks: mpsc::Receiver<Vec<f32>>,
+    /// 收到的声音，单声道、原采样率；最多留 2 秒，收得慢了丢最旧的（施工 VO-49）。
+    pub chunks: newest::Receiver<Vec<f32>>,
     /// 采样率。
     pub rate: u32,
     /// 开的是哪个设备（给人看的名字，同系统声音设置里的；问不到的是编号）：没听到说话时告诉人现在用的是哪个（施工 VO-33）。
@@ -170,7 +174,7 @@ impl Mic {
         let channels = usize::from(supported.channels());
         let mut config = supported.config();
         config.buffer_size = buffer_for(rate, supported.buffer_size());
-        let (sender, chunks) = mpsc::channel::<Vec<f32>>();
+        let (sender, chunks) = pipe(rate);
         let failed: Arc<Mutex<Option<String>>> = Arc::default();
         let stream = match supported.sample_format() {
             SampleFormat::F32 => build::<f32>(&input, &config, channels, sender, &failed),
@@ -242,6 +246,12 @@ fn buffer_for(rate: u32, supported: &cpal::SupportedBufferSize) -> cpal::BufferS
     }
 }
 
+/// 回调交给收麦线程的那一条：按样本数称，最多留 [`KEPT_SECONDS`] 秒（块多大由设备定，所以不按块数）。
+fn pipe(rate: u32) -> (newest::Sender<Vec<f32>>, newest::Receiver<Vec<f32>>) {
+    let rate = usize::try_from(rate).unwrap_or(48_000);
+    newest::channel(rate * KEPT_SECONDS, Vec::len, "microphone chunks")
+}
+
 /// 一块交错的多声道样本，平均成单声道的 f32。
 fn mono<T>(data: &[T], channels: usize) -> Vec<f32>
 where
@@ -260,7 +270,7 @@ fn build<T>(
     input: &cpal::Device,
     config: &cpal::StreamConfig,
     channels: usize,
-    chunks: mpsc::Sender<Vec<f32>>,
+    mut chunks: newest::Sender<Vec<f32>>,
     failed: &Arc<Mutex<Option<String>>>,
 ) -> Result<cpal::Stream, String>
 where
@@ -272,8 +282,8 @@ where
         .build_input_stream::<T, _, _>(
             *config,
             move |data: &[T], _| {
-                // 收的那一头走了（关麦）：丢掉。
-                let _ = chunks.send(mono(data, channels));
+                // 回调里不能等：拿不到锁的下一块一起交；收的那一头走了（关麦）的丢掉。
+                chunks.send_without_waiting(mono(data, channels));
             },
             move |error| {
                 *failed.lock().unwrap_or_else(PoisonError::into_inner) =
