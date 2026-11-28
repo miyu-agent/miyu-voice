@@ -92,7 +92,7 @@ pub fn record(
     let rate = mic.rate;
     if let (Some(speaker), Some(_)) = (chimes, &awake) {
         chime::play_and_wait(speaker, Chime::Wake);
-        while mic.chunks.try_recv().is_ok() {}
+        while mic.chunks.try_recv().is_some() {}
     }
     let result = listen(&mic, rate, silence_ms, max_ms, stopper);
     let name = mic.name.clone();
@@ -118,7 +118,7 @@ fn listen(
 ) -> Result<(Pcm, Ended), RecordError> {
     listen_from(
         || mic.failure(),
-        || mic.chunks.recv_timeout(Duration::from_millis(50)).ok(),
+        || mic.chunks.recv_timeout(Duration::from_millis(50)),
         rate,
         silence_ms,
         max_ms,

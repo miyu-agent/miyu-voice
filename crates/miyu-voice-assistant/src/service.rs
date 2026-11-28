@@ -11,13 +11,12 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use miyu_ext::{Core, Method, MethodError};
 use serde_json::{Map, Value, json};
-use voice_common::{audio, blobs, speaker::Speaker};
+use voice_common::{audio, blobs, newest, speaker::Speaker};
 
 use crate::capture::{self, Switches};
 use crate::choice::Choice;
@@ -35,6 +34,8 @@ const AWAIT: Duration = Duration::from_secs(8);
 const AWAIT_COMMAND: Duration = crate::conversation::FOLLOW_UP;
 /// 默认的唤醒词（项目主人 2026-11-20 验收第 2 条：只留「你好你好」；原来是 Miyu 的名字的几种念法）。
 pub const DEFAULT_WAKE_WORDS: [&str; 1] = ["你好你好"];
+/// 切出来、等着认字的人声最多留几段（施工 VO-49）：认字那头卡住的，再多的丢最旧的。
+const UTTERANCES_KEPT: usize = 30;
 
 /// 包的配置（清单里的 `voice-assistant.*`）。
 #[derive(Debug, Clone, PartialEq)]
@@ -264,7 +265,7 @@ impl Service {
         // 听的那一套（两个模型，约 40 MB）第一次真的开麦收到声音时才建：装上没开的助手只占几 MB。
         let mut ears = Ears::<Listener>::default();
         self.open_session(core);
-        let (utterances, heard) = mpsc::channel::<Vec<f32>>();
+        let (mut utterances, heard) = utterance_queue();
         self.understand_in_turn(core, heard);
         let service = Arc::clone(self);
         let barge_core = core.clone();
@@ -316,13 +317,13 @@ impl Service {
                             // 唤醒词后面紧跟着说了的，照样留一段窗口，等认字、交给她、她开始答。
                             awaiting = Some((Instant::now(), AWAIT));
                             if !rest.is_empty() {
-                                let _ = utterances.send(rest);
+                                utterances.send(rest);
                             }
                         }
                         // 一句：交去认字。窗口再留一会儿，认字、交给她这段不关；没听清的这会儿里再说一次就行。
                         Event::Speech(audio) => {
                             awaiting = Some((Instant::now(), AWAIT));
-                            let _ = utterances.send(audio);
+                            utterances.send(audio);
                         }
                         // 她正念着、你开口了：打断。麦克风里主要是她自己的声音时（回声没消干净）不算。打断要等核心回，
                         // 另开线程，不耽误收麦。
@@ -342,13 +343,13 @@ impl Service {
     }
 
     /// 认字的那个线程：一句句交 `stt`、交给会话（认的时候收麦照常，不漏声音）。
-    fn understand_in_turn(self: &Arc<Service>, core: &Core, heard: mpsc::Receiver<Vec<f32>>) {
+    fn understand_in_turn(self: &Arc<Service>, core: &Core, heard: newest::Receiver<Vec<f32>>) {
         let worker_core = core.clone();
         let service = Arc::clone(self);
         std::thread::spawn(move || {
             // 量时延（施工 VO-13下）：设了 MIYU_VOICE_MEASURE 的，一句话认字、交给会话各用了多久印进日志。
             let measure = std::env::var_os("MIYU_VOICE_MEASURE").is_some();
-            for audio in heard {
+            while let Some(audio) = heard.recv() {
                 let started = Instant::now();
                 let notifier = &service.notifier;
                 let text = match understand(&worker_core, &audio) {
@@ -386,6 +387,11 @@ impl Service {
             }
         });
     }
+}
+
+/// 收麦线程交给认字线程的那一条：最多 [`UTTERANCES_KEPT`] 段。
+fn utterance_queue() -> (newest::Sender<Vec<f32>>, newest::Receiver<Vec<f32>>) {
+    newest::channel(UTTERANCES_KEPT, |_| 1, "miyu-voice-assistant: utterances")
 }
 
 /// 叫醒的那一刻先让识别把模型加载起来：交一段 0.6 秒、几乎没声音的录音（过得了「短于 0.5 秒不认」，认不出字）。语音输入的
